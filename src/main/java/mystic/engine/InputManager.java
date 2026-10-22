@@ -66,6 +66,15 @@ public class InputManager {
     public boolean wasPressed(KeyCode key) {
         return pressedThisFrame.contains(key);
     }
+    
+    /**
+     * Was the key for this action pressed for the first time this frame? (player is
+     * 1 or 2)
+     */
+    public boolean wasPressed(int player, Action action) {
+        KeyCode key = (player == 1 ? p1 : p2).get(action);
+        return key != null && pressedThisFrame.contains(key);
+    }
 
     /** Forget all held keys, e.g. when the window loses focus. */
     public void clear() {
