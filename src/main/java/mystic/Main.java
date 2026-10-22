@@ -10,8 +10,11 @@ import mystic.common.Constants;
 import mystic.common.GameState;
 import mystic.engine.GameEngine;
 import mystic.engine.InputManager;
+import mystic.engine.MainMenuScreen;
 import mystic.engine.PlaceholderScreen;
 import mystic.engine.CombatScreen;
+import mystic.engine.CharacterSelectScreen;
+import mystic.engine.MainMenuScreen;
 
 public class Main extends Application {
 
@@ -25,9 +28,10 @@ public class Main extends Application {
 
         // Temporary screens: ENTER moves MENU -> SELECT -> COMBAT -> RESULT -> MENU
         engine.register(GameState.MENU,
-                new PlaceholderScreen("MYSTIC KOMBAT", engine, GameState.CHARACTER_SELECT));
-        engine.register(GameState.CHARACTER_SELECT,
-                new PlaceholderScreen("CHARACTER SELECT", engine, GameState.COMBAT));
+                new MainMenuScreen(engine));
+        engine.register(
+                GameState.CHARACTER_SELECT,
+                new CharacterSelectScreen(engine));
         engine.register(GameState.COMBAT, new CombatScreen(engine));
         engine.register(GameState.RESULT,
                 new PlaceholderScreen("RESULT", engine, GameState.MENU));
