@@ -51,8 +51,8 @@ public class CombatScreen implements Screen {
 
     @Override
     public void onEnter() {
-        p1 = new MysticMage(1, P1_START_X);
-        p2 = new ShadowVigilante(2, P2_START_X);
+        p1 = engine.createFighter(1, P1_START_X);
+        p2 = engine.createFighter(2, P2_START_X);
 
         p1RoundsWon = 0;
         p2RoundsWon = 0;
