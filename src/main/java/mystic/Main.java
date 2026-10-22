@@ -11,6 +11,7 @@ import mystic.common.GameState;
 import mystic.engine.GameEngine;
 import mystic.engine.InputManager;
 import mystic.engine.PlaceholderScreen;
+import mystic.engine.CombatScreen;
 
 public class Main extends Application {
 
@@ -27,8 +28,7 @@ public class Main extends Application {
                 new PlaceholderScreen("MYSTIC KOMBAT", engine, GameState.CHARACTER_SELECT));
         engine.register(GameState.CHARACTER_SELECT,
                 new PlaceholderScreen("CHARACTER SELECT", engine, GameState.COMBAT));
-        engine.register(GameState.COMBAT,
-                new PlaceholderScreen("COMBAT", engine, GameState.RESULT));
+        engine.register(GameState.COMBAT, new CombatScreen(engine));
         engine.register(GameState.RESULT,
                 new PlaceholderScreen("RESULT", engine, GameState.MENU));
 
