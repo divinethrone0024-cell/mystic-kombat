@@ -1,4 +1,3 @@
-
 package mystic;
 
 import javafx.application.Application;
@@ -6,29 +5,47 @@ import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.paint.Color;
 import javafx.stage.Stage;
+import mystic.common.Constants;
+import mystic.common.GameState;
+import mystic.engine.GameEngine;
+import mystic.engine.InputManager;
+import mystic.engine.PlaceholderScreen;
 
 public class Main extends Application {
 
     @Override
     public void start(Stage stage) {
-        Canvas canvas = new Canvas(1280, 720);
+        Canvas canvas = new Canvas(Constants.WIDTH, Constants.HEIGHT);
         GraphicsContext gc = canvas.getGraphicsContext2D();
 
-        gc.setFill(Color.rgb(12, 12, 24));
-        gc.fillRect(0, 0, 1280, 720);
+        InputManager input = new InputManager();
+        GameEngine engine = new GameEngine(gc, input);
 
-        gc.setFill(Color.CRIMSON);
-        gc.fillRect(200, 504, 64, 96);
+        // Temporary screens: ENTER moves MENU -> SELECT -> COMBAT -> RESULT -> MENU
+        engine.register(GameState.MENU,
+                new PlaceholderScreen("MYSTIC KOMBAT", engine, GameState.CHARACTER_SELECT));
+        engine.register(GameState.CHARACTER_SELECT,
+                new PlaceholderScreen("CHARACTER SELECT", engine, GameState.COMBAT));
+        engine.register(GameState.COMBAT,
+                new PlaceholderScreen("COMBAT", engine, GameState.RESULT));
+        engine.register(GameState.RESULT,
+                new PlaceholderScreen("RESULT", engine, GameState.MENU));
 
-        gc.setFill(Color.DODGERBLUE);
-        gc.fillRect(1016, 504, 64, 96);
+        Scene scene = new Scene(new Group(canvas));
+        input.attach(scene);
+        stage.focusedProperty().addListener((obs, was, now) -> {
+            if (!now) {
+                input.clear(); // avoid "stuck" keys when the window loses focus
+            }
+        });
 
         stage.setTitle("Mystic Kombat");
-        stage.setScene(new Scene(new Group(canvas), 1280, 720));
         stage.setResizable(false);
+        stage.setScene(scene);
         stage.show();
+
+        engine.start();
     }
 
     public static void main(String[] args) {
