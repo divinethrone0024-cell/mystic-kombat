@@ -1,22 +1,34 @@
+
 package mystic.combat;
 
 import mystic.common.Rect;
 import mystic.fighters.Fighter;
 
-/** Decides whether an attack connects, and applies the result. */
+/** Resolves attacks, damage, knockback and Ki gain. */
 public class CombatSystem {
 
-    /** Check if the attacker's active hitbox touches the defender's hurtbox. */
     public void resolve(Fighter attacker, Fighter defender) {
-        Rect hitbox = attacker.getHitbox(); // null if no attack is active
+        Rect hitbox = attacker.getHitbox();
+
         if (hitbox == null || attacker.hasHitThisAttack()) {
-            return; // one hit per attack
+            return;
         }
+
         if (hitbox.overlaps(defender.getHurtbox())) {
             attacker.markHit();
+
             AttackType attack = attacker.getCurrentAttack();
+            int damage = attacker.attackDamage();
+
             double direction = attacker.isFacingRight() ? 1 : -1;
-            defender.takeHit(attacker.attackDamage(), attack.hitstun, direction * attack.knockback);
+
+            defender.takeHit(
+                    damage,
+                    attack.hitstun,
+                    direction * attack.knockback);
+
+            // D7: gain Ki for dealing damage.
+            attacker.gainKi(damage * 0.5);
         }
     }
 }
