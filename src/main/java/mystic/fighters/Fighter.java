@@ -23,6 +23,10 @@ public abstract class Fighter {
     private static final double KNOCKBACK_DECEL = 1000;
     private static final double MAX_KI = 100.0;
 
+    private static final int ULTIMATE_DAMAGE = 35;
+    private static final double ULTIMATE_RANGE = 220.0;
+    private static final double ULTIMATE_EFFECT_DURATION = 0.65;
+
     protected final String name;
     protected final int maxHealth;
     protected int health;
@@ -30,6 +34,7 @@ public abstract class Fighter {
     protected final int damage;
     protected final int player;
     protected final Color color;
+
     private final double startX;
 
     protected double x;
@@ -45,11 +50,19 @@ public abstract class Fighter {
     private double attackTimer;
     private boolean hasHit;
 
-    // D7: Mystic Energy (Ki).
+    // Mystic Energy / Ultimate Incantation.
     private double ki = 0.0;
+    private boolean ultimateActive = false;
+    private double ultimateEffectTimer = 0.0;
 
-    protected Fighter(String name, int maxHealth, int speed, int damage,
-            int player, double startX, Color color) {
+    protected Fighter(
+            String name,
+            int maxHealth,
+            int speed,
+            int damage,
+            int player,
+            double startX,
+            Color color) {
         this.name = name;
         this.maxHealth = maxHealth;
         this.speed = speed;
@@ -57,10 +70,11 @@ public abstract class Fighter {
         this.player = player;
         this.startX = startX;
         this.color = color;
+
         resetForRound();
     }
 
-    /** Reset the fighter for a new round. */
+    /** Reset the fighter and Ki meter for a new round. */
     public final void resetForRound() {
         health = maxHealth;
         x = startX;
@@ -69,18 +83,30 @@ public abstract class Fighter {
         knockbackVx = 0;
         hitstunTimer = 0;
         onGround = true;
+
         currentAttack = null;
         attackTimer = 0;
         hasHit = false;
-        ki = 0.0;
+
+        ki = 0;
+        ultimateActive = false;
+        ultimateEffectTimer = 0;
+
         state = FighterState.IDLE;
         facingRight = startX < Constants.WIDTH / 2.0;
     }
 
-    /** Each character implements its own ultimate attack. */
-    public abstract void useUltimate();
+    /**
+     * Optional character-specific ultimate hook.
+     * Override this method in a fighter class for custom behaviour.
+     */
+    public void useUltimate() {
+        // The shared ultimate effect is handled by Fighter and CombatSystem.
+    }
 
     public void update(double dt, InputManager input, Fighter opponent) {
+        updateUltimateEffect(dt);
+
         if (state == FighterState.KO) {
             physics(dt, 0);
             return;
@@ -135,6 +161,7 @@ public abstract class Fighter {
             if (input.isDown(player, Action.LEFT)) {
                 dir -= 1;
             }
+
             if (input.isDown(player, Action.RIGHT)) {
                 dir += 1;
             }
@@ -194,7 +221,7 @@ public abstract class Fighter {
                 Math.min(Constants.WIDTH - WIDTH / 2, x));
     }
 
-    /** Called when this fighter receives a successful hit. */
+    /** Called when the fighter receives a successful hit. */
     public void takeHit(int amount, double stunSeconds, double knockback) {
         if (state == FighterState.KO) {
             return;
@@ -203,7 +230,7 @@ public abstract class Fighter {
         int actualDamage = Math.min(health, Math.max(0, amount));
         health -= actualDamage;
 
-        // D7: gain Ki when receiving damage.
+        // Taking damage also generates Mystic Energy.
         gainKi(actualDamage * 0.7);
 
         currentAttack = null;
@@ -236,14 +263,42 @@ public abstract class Fighter {
         return ki >= MAX_KI;
     }
 
-    /** Spend a full Ki bar when an ultimate is activated. */
+    /**
+     * Consume the full Ki bar and start the visual effect.
+     * Returns false if the ultimate cannot be activated.
+     */
     public boolean consumeKiForUltimate() {
-        if (!isUltimateReady()) {
+        if (!isUltimateReady() || ultimateActive || isKO()) {
             return false;
         }
 
         ki = 0;
+        ultimateActive = true;
+        ultimateEffectTimer = ULTIMATE_EFFECT_DURATION;
         return true;
+    }
+
+    public boolean isUltimateActive() {
+        return ultimateActive;
+    }
+
+    public void updateUltimateEffect(double dt) {
+        if (ultimateEffectTimer > 0) {
+            ultimateEffectTimer -= dt;
+
+            if (ultimateEffectTimer <= 0) {
+                ultimateEffectTimer = 0;
+                ultimateActive = false;
+            }
+        }
+    }
+
+    public int getUltimateDamage() {
+        return ULTIMATE_DAMAGE;
+    }
+
+    public double getUltimateRange() {
+        return ULTIMATE_RANGE;
     }
 
     public void shiftX(double amount) {
@@ -300,19 +355,33 @@ public abstract class Fighter {
     }
 
     public int attackDamage() {
+        if (currentAttack == null) {
+            return 0;
+        }
+
         return (int) Math.round(
                 damage * currentAttack.damageMultiplier);
     }
 
-    /** Temporary rectangle-based fighter rendering. */
+    /** Draw the fighter and its temporary ultimate effect. */
     public void render(GraphicsContext gc, boolean debug) {
         Rect hb = getHurtbox();
+
         Color body = color;
 
         if (state == FighterState.KO) {
             body = color.darker().darker();
         } else if (state == FighterState.HITSTUN) {
             body = color.brighter();
+        }
+
+        if (ultimateActive) {
+            gc.setStroke(Color.GOLD);
+            gc.setLineWidth(5);
+            gc.strokeOval(
+                    x - 65, y - 105,
+                    130, 115);
+            gc.setLineWidth(1);
         }
 
         gc.setFill(body);
