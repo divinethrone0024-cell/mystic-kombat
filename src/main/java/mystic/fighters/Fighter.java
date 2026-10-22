@@ -27,6 +27,9 @@ public abstract class Fighter {
     private static final double ULTIMATE_RANGE = 220.0;
     private static final double ULTIMATE_EFFECT_DURATION = 0.65;
 
+    // How long the player can buffer their next attack.
+    private static final double INPUT_BUFFER_SECONDS = 0.20;
+
     protected final String name;
     protected final int maxHealth;
     protected int health;
@@ -49,6 +52,10 @@ public abstract class Fighter {
     private AttackType currentAttack;
     private double attackTimer;
     private boolean hasHit;
+
+    // Buffered input for chaining attacks.
+    private AttackType bufferedAttack;
+    private double bufferedAttackTimer;
 
     // Mystic Energy / Ultimate Incantation.
     private double ki = 0.0;
@@ -88,6 +95,9 @@ public abstract class Fighter {
         attackTimer = 0;
         hasHit = false;
 
+        bufferedAttack = null;
+        bufferedAttackTimer = 0;
+
         ki = 0;
         ultimateActive = false;
         ultimateEffectTimer = 0;
@@ -101,7 +111,7 @@ public abstract class Fighter {
      * Override this method in a fighter class for custom behaviour.
      */
     public void useUltimate() {
-        // The shared ultimate effect is handled by Fighter and CombatSystem.
+        // Character-specific ultimate behaviour can be added here.
     }
 
     public void update(double dt, InputManager input, Fighter opponent) {
@@ -112,6 +122,7 @@ public abstract class Fighter {
             return;
         }
 
+        // Hit-stun prevents movement and attacks.
         if (hitstunTimer > 0) {
             hitstunTimer -= dt;
             state = FighterState.HITSTUN;
@@ -124,13 +135,47 @@ public abstract class Fighter {
             return;
         }
 
+        boolean crouching = onGround && input.isDown(player, Action.CROUCH);
+
+        // Continue the current attack and accept buffered attack inputs.
         if (currentAttack != null) {
+            if (!crouching) {
+                if (input.wasPressed(player, Action.HEAVY)) {
+                    bufferedAttack = AttackType.HEAVY;
+                    bufferedAttackTimer = INPUT_BUFFER_SECONDS;
+                } else if (input.wasPressed(player, Action.LIGHT)) {
+                    bufferedAttack = AttackType.LIGHT;
+                    bufferedAttackTimer = INPUT_BUFFER_SECONDS;
+                } else if (bufferedAttack != null) {
+                    bufferedAttackTimer -= dt;
+
+                    if (bufferedAttackTimer <= 0) {
+                        bufferedAttack = null;
+                        bufferedAttackTimer = 0;
+                    }
+                }
+            } else {
+                bufferedAttack = null;
+                bufferedAttackTimer = 0;
+            }
+
             attackTimer += dt;
             physics(dt, 0);
 
             if (attackTimer >= currentAttack.total()) {
                 currentAttack = null;
-                state = FighterState.IDLE;
+
+                // Start the buffered attack if its input has not expired.
+                if (bufferedAttack != null && bufferedAttackTimer > 0) {
+                    AttackType nextAttack = bufferedAttack;
+
+                    bufferedAttack = null;
+                    bufferedAttackTimer = 0;
+
+                    startAttack(nextAttack);
+                } else {
+                    state = FighterState.IDLE;
+                }
             }
             return;
         }
@@ -139,9 +184,9 @@ public abstract class Fighter {
             facingRight = opponent.x > x;
         }
 
-        boolean crouching = onGround && input.isDown(player, Action.CROUCH);
-
-        if (onGround && !crouching) {
+        // Attacks are allowed on the ground and in the air,
+        // but not while crouching.
+        if (!crouching) {
             if (input.wasPressed(player, Action.HEAVY)) {
                 startAttack(AttackType.HEAVY);
                 physics(dt, 0);
@@ -155,6 +200,7 @@ public abstract class Fighter {
             }
         }
 
+        // Horizontal movement.
         double dir = 0;
 
         if (!crouching) {
@@ -167,14 +213,16 @@ public abstract class Fighter {
             }
         }
 
+        // Jump only on a fresh key press.
         if (onGround && !crouching
-                && input.isDown(player, Action.JUMP)) {
+                && input.wasPressed(player, Action.JUMP)) {
             vy = -JUMP_SPEED;
             onGround = false;
         }
 
         physics(dt, dir * speed * SPEED_SCALE);
 
+        // Update the fighter's animation state.
         if (!onGround) {
             state = FighterState.JUMP;
         } else if (crouching) {
@@ -199,6 +247,7 @@ public abstract class Fighter {
     private void physics(double dt, double moveX) {
         x += (moveX + knockbackVx) * dt;
 
+        // Gradually reduce knockback velocity.
         double slow = KNOCKBACK_DECEL * dt;
 
         if (Math.abs(knockbackVx) <= slow) {
@@ -207,15 +256,18 @@ public abstract class Fighter {
             knockbackVx -= Math.signum(knockbackVx) * slow;
         }
 
+        // Gravity and vertical movement.
         vy += Constants.GRAVITY * dt;
         y += vy * dt;
 
+        // Land on the ground.
         if (y >= Constants.GROUND_Y) {
             y = Constants.GROUND_Y;
             vy = 0;
             onGround = true;
         }
 
+        // Keep the fighter inside the arena.
         x = Math.max(
                 WIDTH / 2,
                 Math.min(Constants.WIDTH - WIDTH / 2, x));
@@ -233,8 +285,14 @@ public abstract class Fighter {
         // Taking damage also generates Mystic Energy.
         gainKi(actualDamage * 0.7);
 
+        // Being hit cancels the current attack and buffered input.
         currentAttack = null;
         attackTimer = 0;
+        hasHit = false;
+
+        bufferedAttack = null;
+        bufferedAttackTimer = 0;
+
         knockbackVx = knockback;
 
         if (health == 0) {
@@ -378,9 +436,7 @@ public abstract class Fighter {
         if (ultimateActive) {
             gc.setStroke(Color.GOLD);
             gc.setLineWidth(5);
-            gc.strokeOval(
-                    x - 65, y - 105,
-                    130, 115);
+            gc.strokeOval(x - 65, y - 105, 130, 115);
             gc.setLineWidth(1);
         }
 
