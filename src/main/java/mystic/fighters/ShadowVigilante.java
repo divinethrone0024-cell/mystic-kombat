@@ -1,0 +1,15 @@
+package mystic.fighters;
+
+import javafx.scene.paint.Color;
+
+public class ShadowVigilante extends Fighter {
+
+    public ShadowVigilante(int player, double startX) {
+        super("Shadow Vigilante", 120, 4, 15, player, startX, Color.ORANGERED);
+    }
+
+    @Override
+    public void useUltimate() {
+        System.out.println("Shadow Barrage!"); // real ultimate comes later
+    }
+}
