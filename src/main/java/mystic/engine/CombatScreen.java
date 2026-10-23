@@ -34,6 +34,7 @@ public class CombatScreen implements Screen {
 
     @Override
     public void onEnter() {
+        // A new match starts with a fresh score.
         p1RoundsWon = 0;
         p2RoundsWon = 0;
 
@@ -69,18 +70,19 @@ public class CombatScreen implements Screen {
             return;
         }
 
-        // Update combo timers and impact animations.
+        // Update combo timers and impact effects.
         combat.update(dt);
 
+        // Wait for the player to continue after a round ends.
         if (roundOver) {
             if (input.wasPressed(KeyCode.ENTER)
                     || input.wasPressed(KeyCode.SPACE)) {
 
-                if (p1RoundsWon >= Constants.ROUNDS_TO_WIN
-                        || p2RoundsWon >= Constants.ROUNDS_TO_WIN) {
+                boolean matchFinished = p1RoundsWon >= Constants.ROUNDS_TO_WIN
+                        || p2RoundsWon >= Constants.ROUNDS_TO_WIN;
 
+                if (matchFinished) {
                     engine.changeState(GameState.RESULT);
-
                 } else {
                     startRound();
                 }
@@ -109,9 +111,8 @@ public class CombatScreen implements Screen {
         // Prevent fighters from overlapping.
         keepApart();
 
-        timeRemaining = Math.max(
-                0,
-                timeRemaining - dt);
+        // Update the round timer.
+        timeRemaining = Math.max(0, timeRemaining - dt);
 
         // Check for knockouts.
         if (p1.isKO()) {
@@ -124,14 +125,12 @@ public class CombatScreen implements Screen {
             return;
         }
 
-        // Decide the round winner when time expires.
+        // Decide the winner when time expires.
         if (timeRemaining <= 0) {
             if (p1.getHealth() > p2.getHealth()) {
                 finishRound(1);
-
             } else if (p2.getHealth() > p1.getHealth()) {
                 finishRound(2);
-
             } else {
                 finishRound(0);
             }
@@ -150,13 +149,11 @@ public class CombatScreen implements Screen {
         }
 
         double overlap = minimumDistance - Math.abs(distance);
-
         double separation = overlap / 2.0;
 
         if (distance >= 0) {
             p1.shiftX(-separation);
             p2.shiftX(separation);
-
         } else {
             p1.shiftX(separation);
             p2.shiftX(-separation);
@@ -164,32 +161,50 @@ public class CombatScreen implements Screen {
     }
 
     /**
-     * Finish the current round and update the score.
+     * Finish the current round and update the match score.
      *
      * winner = 1: Player 1
      * winner = 2: Player 2
      * winner = 0: Draw
      */
     private void finishRound(int winner) {
+        // Prevent the same round from being scored twice.
+        if (roundOver) {
+            return;
+        }
+
         roundOver = true;
 
         if (winner == 1) {
             p1RoundsWon++;
             roundMessage = "PLAYER 1 WINS THE ROUND!";
-
         } else if (winner == 2) {
             p2RoundsWon++;
             roundMessage = "PLAYER 2 WINS THE ROUND!";
-
         } else {
             roundMessage = "DRAW!";
         }
 
-        if (p1RoundsWon >= Constants.ROUNDS_TO_WIN) {
+        boolean player1WonMatch = p1RoundsWon >= Constants.ROUNDS_TO_WIN;
+
+        boolean player2WonMatch = p2RoundsWon >= Constants.ROUNDS_TO_WIN;
+
+        // Save the final result when the match is decided.
+        if (player1WonMatch) {
             roundMessage = "PLAYER 1 WINS THE MATCH!";
 
-        } else if (p2RoundsWon >= Constants.ROUNDS_TO_WIN) {
+            engine.setMatchResult(
+                    p1.getName() + " WINS!",
+                    p1RoundsWon,
+                    p2RoundsWon);
+
+        } else if (player2WonMatch) {
             roundMessage = "PLAYER 2 WINS THE MATCH!";
+
+            engine.setMatchResult(
+                    p2.getName() + " WINS!",
+                    p1RoundsWon,
+                    p2RoundsWon);
         }
     }
 
@@ -208,7 +223,7 @@ public class CombatScreen implements Screen {
         // Draw impact effects above the fighters.
         combat.renderEffects(gc);
 
-        // Draw HUD and round overlay last.
+        // Draw the HUD and round overlay last.
         drawHUD(gc);
         drawRoundMessage(gc);
     }
@@ -264,25 +279,24 @@ public class CombatScreen implements Screen {
      * Draw health, Ki, timer, round score, and ultimate status.
      */
     private void drawHUD(GraphicsContext gc) {
-        drawHealthBar(
-                gc, p1,
-                40, 35, 420,
-                false);
+        drawHealthBar(gc, p1, 40, 35, 420, false);
 
         drawHealthBar(
-                gc, p2,
+                gc,
+                p2,
                 Constants.WIDTH - 460,
-                35, 420,
+                35,
+                420,
                 true);
 
-        drawKiBar(
-                gc, p1,
-                40, 88, 300);
+        drawKiBar(gc, p1, 40, 88, 300);
 
         drawKiBar(
-                gc, p2,
+                gc,
+                p2,
                 Constants.WIDTH - 340,
-                88, 300);
+                88,
+                300);
 
         // Round timer.
         gc.setFill(Color.WHITE);
@@ -421,7 +435,6 @@ public class CombatScreen implements Screen {
         ratio = Math.max(0, Math.min(1, ratio));
 
         gc.setFill(Color.rgb(38, 39, 57));
-
         gc.fillRoundRect(
                 x, y,
                 width, height,
@@ -456,7 +469,6 @@ public class CombatScreen implements Screen {
         }
 
         gc.setFill(Color.rgb(0, 0, 0, 0.72));
-
         gc.fillRect(
                 0,
                 Constants.HEIGHT / 2.0 - 75,
@@ -480,7 +492,7 @@ public class CombatScreen implements Screen {
 
         gc.fillText(
                 matchFinished
-                        ? "Press ENTER to continue"
+                        ? "Press ENTER to view results"
                         : "Press ENTER to start the next round",
                 Constants.WIDTH / 2.0,
                 Constants.HEIGHT / 2.0 + 35);
