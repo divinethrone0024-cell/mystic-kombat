@@ -1,3 +1,4 @@
+
 package mystic.engine;
 
 import javafx.application.Platform;
@@ -6,6 +7,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
+
 import mystic.common.Constants;
 import mystic.common.GameState;
 
@@ -15,8 +17,9 @@ public class MainMenuScreen implements Screen {
     private int selectedOption = 0;
 
     private static final String[] OPTIONS = {
-        "START GAME",
-        "QUIT GAME"
+            "START GAME",
+            "SETTINGS",
+            "QUIT GAME"
     };
 
     public MainMenuScreen(GameEngine engine) {
@@ -45,10 +48,21 @@ public class MainMenuScreen implements Screen {
         if (input.wasPressed(KeyCode.ENTER)
                 || input.wasPressed(KeyCode.SPACE)) {
 
-            if (selectedOption == 0) {
-                engine.changeState(GameState.CHARACTER_SELECT);
-            } else {
-                Platform.exit();
+            switch (selectedOption) {
+                case 0:
+                    engine.changeState(GameState.CHARACTER_SELECT);
+                    break;
+
+                case 1:
+                    engine.changeState(GameState.SETTINGS);
+                    break;
+
+                case 2:
+                    Platform.exit();
+                    break;
+
+                default:
+                    break;
             }
         }
 
@@ -80,12 +94,14 @@ public class MainMenuScreen implements Screen {
         gc.strokeLine(80, 95, width - 80, 95);
         gc.strokeLine(80, height - 75, width - 80, height - 75);
 
-        // Small mystical particles
+        // Mystical particles
         gc.setFill(Color.rgb(235, 195, 112, 0.75));
+
         for (int i = 0; i < 35; i++) {
             double x = (i * 137.0 + 43) % width;
             double y = (i * 83.0 + 29) % height;
             double size = (i % 3 == 0) ? 3.5 : 1.8;
+
             gc.fillOval(x, y, size, size);
         }
 
@@ -100,12 +116,11 @@ public class MainMenuScreen implements Screen {
         gc.fillText(
                 "WHEN WORLDS COLLIDE, LEGENDS AWAKEN",
                 centerX,
-                height * 0.30 + 42
-        );
+                height * 0.30 + 42);
 
         // Menu options
-        double firstOptionY = height * 0.56;
-        double optionSpacing = 65;
+        double firstOptionY = height * 0.53;
+        double optionSpacing = 58;
 
         for (int i = 0; i < OPTIONS.length; i++) {
             double y = firstOptionY + i * optionSpacing;
@@ -115,19 +130,20 @@ public class MainMenuScreen implements Screen {
                 gc.setFill(Color.rgb(205, 158, 64, 0.18));
                 gc.fillRoundRect(
                         centerX - 175, y - 35,
-                        350, 48, 14, 14
-                );
+                        350, 48, 14, 14);
 
                 gc.setStroke(Color.rgb(238, 190, 91));
                 gc.setLineWidth(1.5);
                 gc.strokeRoundRect(
                         centerX - 175, y - 35,
-                        350, 48, 14, 14
-                );
+                        350, 48, 14, 14);
 
                 gc.setFill(Color.rgb(255, 218, 139));
                 gc.setFont(Font.font("Serif", 25));
-                gc.fillText("> " + OPTIONS[i] + " <", centerX, y);
+                gc.fillText(
+                        "> " + OPTIONS[i] + " <",
+                        centerX,
+                        y);
             } else {
                 gc.setFill(Color.rgb(174, 176, 196));
                 gc.setFont(Font.font("Serif", 23));
@@ -141,8 +157,7 @@ public class MainMenuScreen implements Screen {
         gc.fillText(
                 "W / S or UP / DOWN  •  ENTER to select  •  ESC to quit",
                 centerX,
-                height - 38
-        );
+                height - 38);
 
         gc.setTextAlign(TextAlignment.LEFT);
     }

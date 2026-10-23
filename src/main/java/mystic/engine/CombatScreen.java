@@ -16,6 +16,8 @@ import mystic.fighters.Fighter;
 public class CombatScreen implements Screen {
 
         private final GameEngine engine;
+        private final PauseMenuScreen pauseMenu = new PauseMenuScreen();
+        private boolean paused = false;
 
         private CombatSystem combat;
         private Fighter p1;
@@ -37,30 +39,55 @@ public class CombatScreen implements Screen {
         private static final double HEALTH_BAR_WIDTH = 420;
         private static final double KI_BAR_WIDTH = 300;
 
+        // Ultimate cinematic settings.
+        private static final double ULTIMATE_CINEMATIC_DURATION = 1.25;
+        private static final double ULTIMATE_FLASH_DURATION = 0.16;
+
+        private double ultimateCinematicTimer;
+        private double ultimateFlashTimer;
+
+        private String ultimateFighterName = "";
+        private int ultimatePlayer;
+
         public CombatScreen(GameEngine engine) {
                 this.engine = engine;
         }
 
         @Override
         public void onEnter() {
+                paused = false;
+                pauseMenu.reset();
+
                 p1RoundsWon = 0;
                 p2RoundsWon = 0;
 
                 combat = new CombatSystem();
 
-                // Use the character selections and constructors from GameEngine.
-                p1 = engine.createFighter(1, Constants.WIDTH * 0.25);
-                p2 = engine.createFighter(2, Constants.WIDTH * 0.75);
+                p1 = engine.createFighter(
+                                1,
+                                Constants.WIDTH * 0.25);
+
+                p2 = engine.createFighter(
+                                2,
+                                Constants.WIDTH * 0.75);
 
                 p1DisplayedHealth = p1.getHealth();
                 p2DisplayedHealth = p2.getHealth();
 
                 hudPulseTime = 0;
 
+                ultimateCinematicTimer = 0;
+                ultimateFlashTimer = 0;
+                ultimateFighterName = "";
+                ultimatePlayer = 0;
+
                 startRound();
         }
 
         private void startRound() {
+                paused = false;
+                pauseMenu.reset();
+
                 p1.resetForRound();
                 p2.resetForRound();
 
@@ -73,6 +100,11 @@ public class CombatScreen implements Screen {
 
                 p1DisplayedHealth = p1.getHealth();
                 p2DisplayedHealth = p2.getHealth();
+
+                ultimateCinematicTimer = 0;
+                ultimateFlashTimer = 0;
+                ultimateFighterName = "";
+                ultimatePlayer = 0;
         }
 
         @Override
@@ -81,12 +113,38 @@ public class CombatScreen implements Screen {
                         return;
                 }
 
-                double safeDt = Math.max(0, Math.min(dt, 0.05));
+                double safeDt = Math.max(
+                                0,
+                                Math.min(dt, 0.05));
+
+                // Handle pause input before any gameplay timers or fighters update.
+                if (paused) {
+                        PauseMenuScreen.Choice choice = pauseMenu.update(input);
+
+                        if (choice == PauseMenuScreen.Choice.RESUME) {
+                                paused = false;
+                        } else if (choice == PauseMenuScreen.Choice.RESTART_ROUND) {
+                                startRound();
+                        } else if (choice == PauseMenuScreen.Choice.MAIN_MENU) {
+                                paused = false;
+                                engine.changeState(GameState.MENU);
+                        }
+
+                        return;
+                }
+
+                // Pause only during an active round, not on the round-result screen.
+                if (!roundOver && input.wasPressed(KeyCode.ESCAPE)) {
+                        paused = true;
+                        pauseMenu.reset();
+                        return;
+                }
 
                 hudPulseTime += safeDt;
-                updateDisplayedHealth(safeDt);
 
+                updateDisplayedHealth(safeDt);
                 combat.update(safeDt);
+                updateUltimateCinematic(safeDt);
 
                 // Wait for the player to continue after a round.
                 if (roundOver) {
@@ -105,12 +163,16 @@ public class CombatScreen implements Screen {
 
                 // Player 1 Ultimate Incantation: H.
                 if (input.wasPressed(1, Action.ULTIMATE)) {
-                        combat.activateUltimate(p1, p2);
+                        if (combat.activateUltimate(p1, p2)) {
+                                startUltimateCinematic(p1, 1);
+                        }
                 }
 
                 // Player 2 Ultimate Incantation: semicolon.
                 if (input.wasPressed(2, Action.ULTIMATE)) {
-                        combat.activateUltimate(p2, p1);
+                        if (combat.activateUltimate(p2, p1)) {
+                                startUltimateCinematic(p2, 2);
+                        }
                 }
 
                 // Update fighters using the existing Fighter API.
@@ -141,6 +203,26 @@ public class CombatScreen implements Screen {
                 }
         }
 
+        // Start the ultimate cinematic only after successful activation.
+        private void startUltimateCinematic(Fighter fighter, int player) {
+                ultimateCinematicTimer = ULTIMATE_CINEMATIC_DURATION;
+                ultimateFlashTimer = ULTIMATE_FLASH_DURATION;
+
+                ultimateFighterName = fighter.getName();
+                ultimatePlayer = player;
+        }
+
+        // Fade the cinematic and flash independently.
+        private void updateUltimateCinematic(double dt) {
+                ultimateCinematicTimer = Math.max(
+                                0,
+                                ultimateCinematicTimer - dt);
+
+                ultimateFlashTimer = Math.max(
+                                0,
+                                ultimateFlashTimer - dt);
+        }
+
         // Smooth the health-bar animation after damage.
         private void updateDisplayedHealth(double dt) {
                 p1DisplayedHealth = approachHealth(
@@ -165,7 +247,9 @@ public class CombatScreen implements Screen {
                         return actual;
                 }
 
-                double blend = Math.min(1.0, dt * HUD_ANIMATION_SPEED);
+                double blend = Math.min(
+                                1.0,
+                                dt * HUD_ANIMATION_SPEED);
 
                 return displayed + difference * blend;
         }
@@ -204,7 +288,9 @@ public class CombatScreen implements Screen {
 
         // Prevent fighters from walking through one another.
         private void keepApart() {
-                double distance = Math.abs(p1.getX() - p2.getX());
+                double distance = Math.abs(
+                                p1.getX() - p2.getX());
+
                 double minimumDistance = Fighter.WIDTH;
 
                 if (distance < minimumDistance) {
@@ -222,24 +308,48 @@ public class CombatScreen implements Screen {
 
         @Override
         public void render(GraphicsContext gc) {
+                // The arena remains stable while the fighters shake.
                 drawArena(gc);
 
-                if (p1 != null) {
-                        p1.render(gc, false);
+                // Apply screen shake only to the combat layer.
+                gc.save();
+
+                try {
+                        if (combat != null) {
+                                gc.translate(
+                                                combat.getScreenShakeX(),
+                                                combat.getScreenShakeY());
+                        }
+
+                        if (p1 != null) {
+                                p1.render(gc, false);
+                        }
+
+                        if (p2 != null) {
+                                p2.render(gc, false);
+                        }
+
+                        if (combat != null) {
+                                combat.renderEffects(gc);
+                        }
+                } finally {
+                        gc.restore();
                 }
 
-                if (p2 != null) {
-                        p2.render(gc, false);
-                }
-
-                if (combat != null) {
-                        combat.renderEffects(gc);
-                }
-
+                // Keep the HUD stable during screen shake.
                 drawHUD(gc);
 
-                if (roundOver) {
+                // Show the round result after the cinematic finishes.
+                if (roundOver && ultimateCinematicTimer <= 0) {
                         drawRoundMessage(gc);
+                }
+
+                // Render the cinematic above the arena and HUD.
+                drawUltimateCinematic(gc);
+
+                // The pause overlay must be the topmost layer.
+                if (paused) {
+                        pauseMenu.render(gc);
                 }
         }
 
@@ -269,7 +379,11 @@ public class CombatScreen implements Screen {
 
                 // Floor.
                 gc.setFill(Color.rgb(19, 22, 39));
-                gc.fillRect(0, ground, width, height - ground);
+                gc.fillRect(
+                                0,
+                                ground,
+                                width,
+                                height - ground);
 
                 gc.setStroke(Color.rgb(212, 175, 55, 0.8));
                 gc.setLineWidth(2);
@@ -280,7 +394,11 @@ public class CombatScreen implements Screen {
                 gc.setLineWidth(1);
 
                 for (int x = 0; x < width; x += 50) {
-                        gc.strokeLine(x, ground, x - 40, height);
+                        gc.strokeLine(
+                                        x,
+                                        ground,
+                                        x - 40,
+                                        height);
                 }
 
                 // Center arena line.
@@ -320,8 +438,21 @@ public class CombatScreen implements Screen {
                                 true);
 
                 // Mystic Energy meters.
-                drawKiBar(gc, p1, 40, 91, KI_BAR_WIDTH, false);
-                drawKiBar(gc, p2, width - 340, 91, KI_BAR_WIDTH, true);
+                drawKiBar(
+                                gc,
+                                p1,
+                                40,
+                                91,
+                                KI_BAR_WIDTH,
+                                false);
+
+                drawKiBar(
+                                gc,
+                                p2,
+                                width - 340,
+                                91,
+                                KI_BAR_WIDTH,
+                                true);
 
                 // Round timer.
                 gc.setTextAlign(TextAlignment.CENTER);
@@ -331,7 +462,9 @@ public class CombatScreen implements Screen {
                 gc.fillText(
                                 String.format(
                                                 "%02d",
-                                                Math.max(0, (int) Math.ceil(timeRemaining))),
+                                                Math.max(
+                                                                0,
+                                                                (int) Math.ceil(timeRemaining))),
                                 center,
                                 52);
 
@@ -345,12 +478,49 @@ public class CombatScreen implements Screen {
                                 79);
 
                 // Two round-win pips per player.
-                drawRoundPips(gc, center - 45, 98, p1RoundsWon, false);
-                drawRoundPips(gc, center + 45, 98, p2RoundsWon, true);
+                drawRoundPips(
+                                gc,
+                                center - 45,
+                                98,
+                                p1RoundsWon,
+                                false);
 
-                // Ultimate readiness indicator.
-                drawUltimateLabel(gc, p1, 40, 128, false);
-                drawUltimateLabel(gc, p2, width - 340, 128, true);
+                drawRoundPips(
+                                gc,
+                                center + 45,
+                                98,
+                                p2RoundsWon,
+                                true);
+
+                // Ultimate readiness indicators.
+                drawUltimateLabel(
+                                gc,
+                                p1,
+                                40,
+                                128,
+                                false);
+
+                drawUltimateLabel(
+                                gc,
+                                p2,
+                                width - 340,
+                                128,
+                                true);
+
+                // Combo counters.
+                drawComboCounter(
+                                gc,
+                                combat.getComboCount(p1),
+                                40,
+                                151,
+                                false);
+
+                drawComboCounter(
+                                gc,
+                                combat.getComboCount(p2),
+                                width - 40,
+                                151,
+                                true);
         }
 
         private void drawHealthBar(
@@ -363,18 +533,30 @@ public class CombatScreen implements Screen {
                         boolean reverse) {
 
                 double barHeight = 22;
-                double maxHealth = Math.max(1, fighter.getMaxHealth());
+
+                double maxHealth = Math.max(
+                                1,
+                                fighter.getMaxHealth());
 
                 double actualRatio = clamp(
-                                fighter.getHealth() / maxHealth, 0, 1);
+                                fighter.getHealth() / maxHealth,
+                                0,
+                                1);
 
                 double displayedRatio = clamp(
-                                displayedHealth / maxHealth, 0, 1);
+                                displayedHealth / maxHealth,
+                                0,
+                                1);
 
                 // Health-bar background.
                 gc.setFill(Color.rgb(35, 35, 48));
                 gc.fillRoundRect(
-                                x, y, barWidth, barHeight, 8, 8);
+                                x,
+                                y,
+                                barWidth,
+                                barHeight,
+                                8,
+                                8);
 
                 // Delayed red trail for recently lost health.
                 double trailWidth = barWidth * displayedRatio;
@@ -434,18 +616,29 @@ public class CombatScreen implements Screen {
 
                 gc.setStroke(Color.rgb(220, 225, 245, 0.7));
                 gc.setLineWidth(1);
+
                 gc.strokeRoundRect(
-                                x, y, barWidth, barHeight, 8, 8);
+                                x,
+                                y,
+                                barWidth,
+                                barHeight,
+                                8,
+                                8);
 
                 // Display actual health numbers.
                 gc.setFont(Font.font("Arial", 13));
                 gc.setFill(Color.WHITE);
+
                 gc.setTextAlign(
-                                reverse ? TextAlignment.RIGHT : TextAlignment.LEFT);
+                                reverse
+                                                ? TextAlignment.RIGHT
+                                                : TextAlignment.LEFT);
 
                 gc.fillText(
-                                fighter.getName() + "  "
-                                                + fighter.getHealth() + " / "
+                                fighter.getName()
+                                                + "  "
+                                                + fighter.getHealth()
+                                                + " / "
                                                 + fighter.getMaxHealth(),
                                 reverse ? x + barWidth : x,
                                 y - 7);
@@ -460,8 +653,13 @@ public class CombatScreen implements Screen {
                         boolean reverse) {
 
                 double barHeight = 13;
+
+                double maxKi = Math.max(1, fighter.getMaxKi());
+
                 double kiRatio = clamp(
-                                fighter.getKi() / fighter.getMaxKi(), 0, 1);
+                                fighter.getKi() / maxKi,
+                                0,
+                                1);
 
                 boolean ready = fighter.isUltimateReady();
 
@@ -484,7 +682,12 @@ public class CombatScreen implements Screen {
 
                 gc.setFill(Color.rgb(30, 32, 48));
                 gc.fillRoundRect(
-                                x, y, barWidth, barHeight, 7, 7);
+                                x,
+                                y,
+                                barWidth,
+                                barHeight,
+                                7,
+                                7);
 
                 gc.setFill(
                                 ready
@@ -517,13 +720,22 @@ public class CombatScreen implements Screen {
                                                 : Color.rgb(130, 190, 255, 0.8));
 
                 gc.setLineWidth(1);
+
                 gc.strokeRoundRect(
-                                x, y, barWidth, barHeight, 7, 7);
+                                x,
+                                y,
+                                barWidth,
+                                barHeight,
+                                7,
+                                7);
 
                 gc.setFont(Font.font("Arial", 10));
                 gc.setFill(Color.WHITE);
+
                 gc.setTextAlign(
-                                reverse ? TextAlignment.RIGHT : TextAlignment.LEFT);
+                                reverse
+                                                ? TextAlignment.RIGHT
+                                                : TextAlignment.LEFT);
 
                 gc.fillText(
                                 "MYSTIC ENERGY  "
@@ -583,6 +795,7 @@ public class CombatScreen implements Screen {
                 boolean ready = fighter.isUltimateReady();
 
                 gc.setFont(Font.font("Arial", 12));
+
                 gc.setTextAlign(
                                 rightAligned
                                                 ? TextAlignment.RIGHT
@@ -612,8 +825,236 @@ public class CombatScreen implements Screen {
                 }
         }
 
+        /**
+         * Display the current combo once a player lands
+         * at least two consecutive hits.
+         */
+        private void drawComboCounter(
+                        GraphicsContext gc,
+                        int comboCount,
+                        double x,
+                        double y,
+                        boolean rightAligned) {
+
+                if (comboCount < 2) {
+                        return;
+                }
+
+                gc.save();
+
+                try {
+                        gc.setTextAlign(
+                                        rightAligned
+                                                        ? TextAlignment.RIGHT
+                                                        : TextAlignment.LEFT);
+
+                        gc.setFont(Font.font("Arial", 17));
+                        gc.setFill(Color.rgb(255, 205, 65));
+
+                        gc.fillText(
+                                        comboCount + " HIT COMBO!",
+                                        x,
+                                        y);
+                } finally {
+                        gc.restore();
+                }
+        }
+
+        /**
+         * Draw the Ultimate Incantation flash and title panel.
+         */
+        private void drawUltimateCinematic(GraphicsContext gc) {
+                if (ultimateCinematicTimer <= 0
+                                && ultimateFlashTimer <= 0) {
+                        return;
+                }
+
+                gc.save();
+
+                try {
+                        double width = Constants.WIDTH;
+                        double height = Constants.HEIGHT;
+                        double centerX = width / 2.0;
+
+                        // Gold-white activation flash.
+                        if (ultimateFlashTimer > 0) {
+                                double flashProgress = ultimateFlashTimer
+                                                / ULTIMATE_FLASH_DURATION;
+
+                                double flashAlpha = 0.38 * flashProgress;
+
+                                gc.setFill(Color.rgb(
+                                                255,
+                                                238,
+                                                175,
+                                                flashAlpha));
+
+                                gc.fillRect(
+                                                0,
+                                                0,
+                                                width,
+                                                height);
+                        }
+
+                        if (ultimateCinematicTimer <= 0) {
+                                return;
+                        }
+
+                        // Smooth fade-in and fade-out.
+                        double fadeIn = Math.min(
+                                        1.0,
+                                        (ULTIMATE_CINEMATIC_DURATION
+                                                        - ultimateCinematicTimer) / 0.12);
+
+                        double fadeOut = Math.min(
+                                        1.0,
+                                        ultimateCinematicTimer / 0.25);
+
+                        double alpha = Math.max(
+                                        0,
+                                        Math.min(fadeIn, fadeOut));
+
+                        // Subtle dark overlay.
+                        gc.setFill(Color.rgb(
+                                        4,
+                                        5,
+                                        16,
+                                        0.24 * alpha));
+
+                        gc.fillRect(
+                                        0,
+                                        0,
+                                        width,
+                                        height);
+
+                        // Cinematic top and bottom borders.
+                        gc.setFill(Color.rgb(
+                                        5,
+                                        6,
+                                        18,
+                                        0.88 * alpha));
+
+                        gc.fillRect(0, 0, width, 24);
+                        gc.fillRect(0, height - 24, width, 24);
+
+                        gc.setFill(Color.rgb(
+                                        255,
+                                        205,
+                                        65,
+                                        0.85 * alpha));
+
+                        gc.fillRect(0, 23, width, 2);
+                        gc.fillRect(0, height - 25, width, 2);
+
+                        // Central announcement panel.
+                        double panelWidth = Math.min(
+                                        width - 60,
+                                        760);
+
+                        double panelHeight = 112;
+
+                        double panelX = centerX - panelWidth / 2.0;
+                        double panelY = height * 0.20;
+
+                        gc.setFill(Color.rgb(
+                                        12,
+                                        13,
+                                        30,
+                                        0.94 * alpha));
+
+                        gc.fillRoundRect(
+                                        panelX,
+                                        panelY,
+                                        panelWidth,
+                                        panelHeight,
+                                        18,
+                                        18);
+
+                        gc.setStroke(Color.rgb(
+                                        255,
+                                        205,
+                                        65,
+                                        alpha));
+
+                        gc.setLineWidth(2);
+
+                        gc.strokeRoundRect(
+                                        panelX,
+                                        panelY,
+                                        panelWidth,
+                                        panelHeight,
+                                        18,
+                                        18);
+
+                        // Decorative gold accents.
+                        gc.setFill(Color.rgb(
+                                        255,
+                                        220,
+                                        110,
+                                        alpha));
+
+                        gc.fillRect(
+                                        panelX + 28,
+                                        panelY + 18,
+                                        5,
+                                        panelHeight - 36);
+
+                        gc.fillRect(
+                                        panelX + panelWidth - 33,
+                                        panelY + 18,
+                                        5,
+                                        panelHeight - 36);
+
+                        // Ultimate title.
+                        gc.setTextAlign(TextAlignment.CENTER);
+
+                        gc.setFont(Font.font("Arial", 30));
+                        gc.setFill(Color.rgb(
+                                        255,
+                                        218,
+                                        105,
+                                        alpha));
+
+                        gc.fillText(
+                                        "ULTIMATE INCANTATION",
+                                        centerX,
+                                        panelY + 43);
+
+                        // Fighter name.
+                        gc.setFont(Font.font("Arial", 17));
+                        gc.setFill(Color.rgb(
+                                        245,
+                                        245,
+                                        255,
+                                        alpha));
+
+                        gc.fillText(
+                                        "PLAYER " + ultimatePlayer
+                                                        + "  -  " + ultimateFighterName,
+                                        centerX,
+                                        panelY + 76);
+
+                        // Subtitle.
+                        gc.setFont(Font.font("Arial", 11));
+                        gc.setFill(Color.rgb(
+                                        175,
+                                        185,
+                                        220,
+                                        alpha));
+
+                        gc.fillText(
+                                        "MYSTIC ENERGY RELEASED",
+                                        centerX,
+                                        panelY + 96);
+
+                } finally {
+                        gc.restore();
+                }
+        }
+
         private void drawRoundMessage(GraphicsContext gc) {
                 gc.setFill(Color.rgb(0, 0, 0, 0.78));
+
                 gc.fillRect(
                                 0,
                                 0,
@@ -647,6 +1088,8 @@ public class CombatScreen implements Screen {
                         double min,
                         double max) {
 
-                return Math.max(min, Math.min(max, value));
+                return Math.max(
+                                min,
+                                Math.min(max, value));
         }
 }

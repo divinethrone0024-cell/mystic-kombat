@@ -16,6 +16,7 @@ import mystic.engine.GameEngine;
 import mystic.engine.InputManager;
 import mystic.engine.MainMenuScreen;
 import mystic.engine.ResultScreen;
+import mystic.engine.SettingsScreen;
 
 public class Main extends Application {
 
@@ -46,7 +47,10 @@ public class Main extends Application {
         engine.register(
                 GameState.RESULT,
                 new ResultScreen(engine));
-
+        engine.register(
+                GameState.SETTINGS,
+                new SettingsScreen(engine));        
+                
         Scene scene = new Scene(new Group(canvas));
 
         input.attach(scene);

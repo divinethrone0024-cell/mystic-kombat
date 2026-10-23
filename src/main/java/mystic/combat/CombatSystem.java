@@ -14,7 +14,8 @@ import mystic.fighters.Fighter;
 
 /**
  * Handles attacks, combo tracking, damage scaling,
- * Ultimate Incantations, hit-stop, and impact effects.
+ * Ultimate Incantations, hit-stop, screen shake,
+ * and impact effects.
  */
 public class CombatSystem {
 
@@ -38,6 +39,11 @@ public class CombatSystem {
     private final List<ImpactEffect> impactEffects = new ArrayList<>();
 
     private double hitStopTimer;
+
+    // Screen-shake state.
+    private double screenShakeTimer;
+    private double screenShakeDuration;
+    private double screenShakeMagnitude;
 
     private static class ComboData {
         private final Fighter target;
@@ -79,7 +85,8 @@ public class CombatSystem {
     }
 
     /**
-     * Update combo timers, hit-stop, and impact effects once per frame.
+     * Update combo timers, hit-stop, screen shake,
+     * and impact effects once per frame.
      */
     public void update(double dt) {
         if (!Double.isFinite(dt) || dt <= 0) {
@@ -88,10 +95,21 @@ public class CombatSystem {
 
         hitStopTimer = Math.max(0, hitStopTimer - dt);
 
+        // Fade out screen shake over time.
+        screenShakeTimer = Math.max(
+                0,
+                screenShakeTimer - dt);
+
+        if (screenShakeTimer <= 0) {
+            screenShakeMagnitude = 0;
+            screenShakeDuration = 0;
+        }
+
         Iterator<Map.Entry<Fighter, ComboData>> comboIterator = combos.entrySet().iterator();
 
         while (comboIterator.hasNext()) {
             ComboData combo = comboIterator.next().getValue();
+
             combo.timer -= dt;
 
             if (combo.timer <= 0) {
@@ -104,9 +122,6 @@ public class CombatSystem {
 
     /**
      * Returns true while the combat system's hit-stop timer is active.
-     *
-     * CombatScreen can use this to pause fighter updates briefly
-     * without stopping the round timer or the whole game loop.
      */
     public boolean isHitStopActive() {
         return hitStopTimer > 0;
@@ -117,7 +132,43 @@ public class CombatSystem {
      */
     public int getComboCount(Fighter attacker) {
         ComboData combo = combos.get(attacker);
+
         return combo == null ? 0 : combo.count;
+    }
+
+    /**
+     * Current horizontal screen-shake offset.
+     */
+    public double getScreenShakeX() {
+        return getScreenShakeOffset(1.0);
+    }
+
+    /**
+     * Current vertical screen-shake offset.
+     */
+    public double getScreenShakeY() {
+        return getScreenShakeOffset(2.3);
+    }
+
+    /**
+     * Calculate a decaying screen-shake offset.
+     */
+    private double getScreenShakeOffset(double frequency) {
+        if (screenShakeTimer <= 0 || screenShakeDuration <= 0) {
+            return 0;
+        }
+
+        double progress = Math.max(
+                0,
+                Math.min(
+                        1,
+                        screenShakeTimer / screenShakeDuration));
+
+        double envelope = progress * progress;
+
+        return Math.sin(screenShakeTimer * 85 * frequency)
+                * screenShakeMagnitude
+                * envelope;
     }
 
     /**
@@ -128,11 +179,16 @@ public class CombatSystem {
     }
 
     /**
-     * Clear temporary effects and hit-stop at round reset.
+     * Clear temporary effects, hit-stop, and screen shake at round reset.
      */
     public void resetEffects() {
         impactEffects.clear();
+
         hitStopTimer = 0;
+
+        screenShakeTimer = 0;
+        screenShakeDuration = 0;
+        screenShakeMagnitude = 0;
     }
 
     /**
@@ -179,7 +235,28 @@ public class CombatSystem {
      * A stronger hit can extend the current interval.
      */
     private void triggerHitStop(double duration) {
-        hitStopTimer = Math.max(hitStopTimer, duration);
+        hitStopTimer = Math.max(
+                hitStopTimer,
+                duration);
+    }
+
+    /**
+     * Start or strengthen screen shake.
+     */
+    private void triggerScreenShake(
+            double duration,
+            double magnitude) {
+
+        if (magnitude >= screenShakeMagnitude
+                || screenShakeTimer <= 0) {
+
+            screenShakeDuration = duration;
+            screenShakeMagnitude = magnitude;
+        }
+
+        screenShakeTimer = Math.max(
+                screenShakeTimer,
+                duration);
     }
 
     /**
@@ -225,9 +302,15 @@ public class CombatSystem {
      * Resolve a normal attack when its hitbox overlaps
      * the opponent's hurtbox.
      */
-    public void resolve(Fighter attacker, Fighter defender) {
-        if (attacker == null || defender == null
-                || attacker.isKO() || defender.isKO()) {
+    public void resolve(
+            Fighter attacker,
+            Fighter defender) {
+
+        if (attacker == null
+                || defender == null
+                || attacker.isKO()
+                || defender.isKO()) {
+
             return;
         }
 
@@ -265,12 +348,18 @@ public class CombatSystem {
                 attack.hitstun,
                 direction * attack.knockback);
 
-        addImpactEffect(attacker, defender, false, attack);
+        addImpactEffect(
+                attacker,
+                defender,
+                false,
+                attack);
 
         if (attack == AttackType.HEAVY) {
             triggerHitStop(HEAVY_HIT_STOP);
+            triggerScreenShake(0.14, 8);
         } else {
             triggerHitStop(LIGHT_HIT_STOP);
+            triggerScreenShake(0.09, 4);
         }
 
         // Reward the attacker with Mystic Energy.
@@ -296,6 +385,7 @@ public class CombatSystem {
 
         if (!attacker.isUltimateReady()
                 || attacker.isUltimateActive()) {
+
             return false;
         }
 
@@ -328,8 +418,14 @@ public class CombatSystem {
                 ULTIMATE_STUN,
                 direction * ULTIMATE_KNOCKBACK);
 
-        addImpactEffect(attacker, defender, true, null);
+        addImpactEffect(
+                attacker,
+                defender,
+                true,
+                null);
+
         triggerHitStop(ULTIMATE_HIT_STOP);
+        triggerScreenShake(0.28, 16);
 
         return true;
     }
@@ -346,6 +442,7 @@ public class CombatSystem {
 
         while (iterator.hasNext()) {
             ImpactEffect effect = iterator.next();
+
             effect.timer -= dt;
 
             if (effect.timer <= 0) {
@@ -380,7 +477,9 @@ public class CombatSystem {
                 gc.setGlobalAlpha(alpha);
                 gc.setStroke(effect.color);
                 gc.setFill(effect.color);
-                gc.setLineWidth(effect.ultimate ? 4 : 2);
+
+                gc.setLineWidth(
+                        effect.ultimate ? 4 : 2);
 
                 // Expanding impact ring.
                 gc.strokeOval(
@@ -403,9 +502,11 @@ public class CombatSystem {
                             * (effect.ultimate ? 2.0 : 1.6);
 
                     double startX = effect.x + Math.cos(angle) * inner;
+
                     double startY = effect.y + Math.sin(angle) * inner;
 
                     double endX = effect.x + Math.cos(angle) * outer;
+
                     double endY = effect.y + Math.sin(angle) * outer;
 
                     gc.strokeLine(
@@ -425,7 +526,7 @@ public class CombatSystem {
                 }
             }
         } finally {
-            // Restore all graphics settings for the HUD and next frame.
+            // Restore graphics settings for the HUD and next frame.
             gc.restore();
         }
     }

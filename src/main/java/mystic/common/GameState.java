@@ -5,5 +5,6 @@ public enum GameState {
     MENU,
     CHARACTER_SELECT,
     COMBAT,
-    RESULT
+    RESULT,
+    SETTINGS
 }
