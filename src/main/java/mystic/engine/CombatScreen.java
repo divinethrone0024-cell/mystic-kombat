@@ -15,486 +15,638 @@ import mystic.fighters.Fighter;
 
 public class CombatScreen implements Screen {
 
-    private final GameEngine engine;
-    private final CombatSystem combat = new CombatSystem();
+        private final GameEngine engine;
 
-    private Fighter p1;
-    private Fighter p2;
+        private CombatSystem combat;
+        private Fighter p1;
+        private Fighter p2;
 
-    private double timeRemaining;
-    private boolean roundOver;
-    private String roundMessage = "";
+        private double timeRemaining;
+        private boolean roundOver;
+        private String roundMessage = "";
 
-    private int p1RoundsWon;
-    private int p2RoundsWon;
+        private int p1RoundsWon;
+        private int p2RoundsWon;
 
-    public CombatScreen(GameEngine engine) {
-        this.engine = engine;
-    }
+        // Animated HUD values.
+        private double p1DisplayedHealth;
+        private double p2DisplayedHealth;
+        private double hudPulseTime;
 
-    @Override
-    public void onEnter() {
-        // A new match starts with a fresh score.
-        p1RoundsWon = 0;
-        p2RoundsWon = 0;
+        private static final double HUD_ANIMATION_SPEED = 8.0;
+        private static final double HEALTH_BAR_WIDTH = 420;
+        private static final double KI_BAR_WIDTH = 300;
 
-        combat.resetCombos();
-        combat.resetEffects();
-
-        p1 = engine.createFighter(
-                1,
-                Constants.WIDTH * 0.25);
-
-        p2 = engine.createFighter(
-                2,
-                Constants.WIDTH * 0.75);
-
-        startRound();
-    }
-
-    private void startRound() {
-        p1.resetForRound();
-        p2.resetForRound();
-
-        combat.resetCombos();
-        combat.resetEffects();
-
-        timeRemaining = Constants.ROUND_SECONDS;
-        roundOver = false;
-        roundMessage = "";
-    }
-
-    @Override
-    public void update(double dt, InputManager input) {
-        if (p1 == null || p2 == null) {
-            return;
+        public CombatScreen(GameEngine engine) {
+                this.engine = engine;
         }
 
-        // Update combo timers and impact effects.
-        combat.update(dt);
+        @Override
+        public void onEnter() {
+                p1RoundsWon = 0;
+                p2RoundsWon = 0;
 
-        // Wait for the player to continue after a round ends.
-        if (roundOver) {
-            if (input.wasPressed(KeyCode.ENTER)
-                    || input.wasPressed(KeyCode.SPACE)) {
+                combat = new CombatSystem();
 
-                boolean matchFinished = p1RoundsWon >= Constants.ROUNDS_TO_WIN
-                        || p2RoundsWon >= Constants.ROUNDS_TO_WIN;
+                // Use the character selections and constructors from GameEngine.
+                p1 = engine.createFighter(1, Constants.WIDTH * 0.25);
+                p2 = engine.createFighter(2, Constants.WIDTH * 0.75);
 
-                if (matchFinished) {
-                    engine.changeState(GameState.RESULT);
-                } else {
-                    startRound();
+                p1DisplayedHealth = p1.getHealth();
+                p2DisplayedHealth = p2.getHealth();
+
+                hudPulseTime = 0;
+
+                startRound();
+        }
+
+        private void startRound() {
+                p1.resetForRound();
+                p2.resetForRound();
+
+                combat.resetCombos();
+                combat.resetEffects();
+
+                timeRemaining = Constants.ROUND_SECONDS;
+                roundOver = false;
+                roundMessage = "";
+
+                p1DisplayedHealth = p1.getHealth();
+                p2DisplayedHealth = p2.getHealth();
+        }
+
+        @Override
+        public void update(double dt, InputManager input) {
+                if (p1 == null || p2 == null || combat == null) {
+                        return;
                 }
-            }
 
-            return;
+                double safeDt = Math.max(0, Math.min(dt, 0.05));
+
+                hudPulseTime += safeDt;
+                updateDisplayedHealth(safeDt);
+
+                combat.update(safeDt);
+
+                // Wait for the player to continue after a round.
+                if (roundOver) {
+                        if (input.wasPressed(KeyCode.ENTER)
+                                        || input.wasPressed(KeyCode.SPACE)) {
+
+                                if (p1RoundsWon >= 2 || p2RoundsWon >= 2) {
+                                        engine.changeState(GameState.RESULT);
+                                } else {
+                                        startRound();
+                                }
+                        }
+
+                        return;
+                }
+
+                // Player 1 Ultimate Incantation: H.
+                if (input.wasPressed(1, Action.ULTIMATE)) {
+                        combat.activateUltimate(p1, p2);
+                }
+
+                // Player 2 Ultimate Incantation: semicolon.
+                if (input.wasPressed(2, Action.ULTIMATE)) {
+                        combat.activateUltimate(p2, p1);
+                }
+
+                // Update fighters using the existing Fighter API.
+                p1.update(safeDt, input, p2);
+                p2.update(safeDt, input, p1);
+
+                // Resolve attacks from both players.
+                combat.resolve(p1, p2);
+                combat.resolve(p2, p1);
+
+                keepApart();
+
+                timeRemaining -= safeDt;
+
+                // Determine the round winner.
+                if (p1.isKO()) {
+                        finishRound(2);
+                } else if (p2.isKO()) {
+                        finishRound(1);
+                } else if (timeRemaining <= 0) {
+                        if (p1.getHealth() > p2.getHealth()) {
+                                finishRound(1);
+                        } else if (p2.getHealth() > p1.getHealth()) {
+                                finishRound(2);
+                        } else {
+                                finishRound(0);
+                        }
+                }
         }
 
-        // Activate Ultimate Incantations.
-        if (input.wasPressed(1, Action.ULTIMATE)) {
-            combat.activateUltimate(p1, p2);
+        // Smooth the health-bar animation after damage.
+        private void updateDisplayedHealth(double dt) {
+                p1DisplayedHealth = approachHealth(
+                                p1DisplayedHealth,
+                                p1.getHealth(),
+                                dt);
+
+                p2DisplayedHealth = approachHealth(
+                                p2DisplayedHealth,
+                                p2.getHealth(),
+                                dt);
         }
 
-        if (input.wasPressed(2, Action.ULTIMATE)) {
-            combat.activateUltimate(p2, p1);
+        private double approachHealth(
+                        double displayed,
+                        double actual,
+                        double dt) {
+
+                double difference = actual - displayed;
+
+                if (Math.abs(difference) < 0.1) {
+                        return actual;
+                }
+
+                double blend = Math.min(1.0, dt * HUD_ANIMATION_SPEED);
+
+                return displayed + difference * blend;
         }
 
-        // Update both fighters.
-        p1.update(dt, input, p2);
-        p2.update(dt, input, p1);
+        private void finishRound(int winner) {
+                if (roundOver) {
+                        return;
+                }
 
-        // Resolve normal attacks.
-        combat.resolve(p1, p2);
-        combat.resolve(p2, p1);
+                roundOver = true;
 
-        // Prevent fighters from overlapping.
-        keepApart();
+                if (winner == 1) {
+                        p1RoundsWon++;
+                        roundMessage = "PLAYER 1 WINS THE ROUND!";
+                } else if (winner == 2) {
+                        p2RoundsWon++;
+                        roundMessage = "PLAYER 2 WINS THE ROUND!";
+                } else {
+                        roundMessage = "ROUND DRAW!";
+                }
 
-        // Update the round timer.
-        timeRemaining = Math.max(0, timeRemaining - dt);
+                // A best-of-three match ends when either player wins two rounds.
+                if (p1RoundsWon >= 2 || p2RoundsWon >= 2) {
+                        String matchWinner = p1RoundsWon > p2RoundsWon
+                                        ? p1.getName() + " WINS!"
+                                        : p2.getName() + " WINS!";
 
-        // Check for knockouts.
-        if (p1.isKO()) {
-            finishRound(2);
-            return;
+                        engine.setMatchResult(
+                                        matchWinner,
+                                        p1RoundsWon,
+                                        p2RoundsWon);
+
+                        roundMessage = matchWinner;
+                }
         }
 
-        if (p2.isKO()) {
-            finishRound(1);
-            return;
+        // Prevent fighters from walking through one another.
+        private void keepApart() {
+                double distance = Math.abs(p1.getX() - p2.getX());
+                double minimumDistance = Fighter.WIDTH;
+
+                if (distance < minimumDistance) {
+                        double push = (minimumDistance - distance) / 2.0;
+
+                        if (p1.getX() < p2.getX()) {
+                                p1.shiftX(-push);
+                                p2.shiftX(push);
+                        } else {
+                                p1.shiftX(push);
+                                p2.shiftX(-push);
+                        }
+                }
         }
 
-        // Decide the winner when time expires.
-        if (timeRemaining <= 0) {
-            if (p1.getHealth() > p2.getHealth()) {
-                finishRound(1);
-            } else if (p2.getHealth() > p1.getHealth()) {
-                finishRound(2);
-            } else {
-                finishRound(0);
-            }
-        }
-    }
+        @Override
+        public void render(GraphicsContext gc) {
+                drawArena(gc);
 
-    /**
-     * Separate fighters when their horizontal positions overlap.
-     */
-    private void keepApart() {
-        double distance = p2.getX() - p1.getX();
-        double minimumDistance = Fighter.WIDTH;
+                if (p1 != null) {
+                        p1.render(gc, false);
+                }
 
-        if (Math.abs(distance) >= minimumDistance) {
-            return;
-        }
+                if (p2 != null) {
+                        p2.render(gc, false);
+                }
 
-        double overlap = minimumDistance - Math.abs(distance);
-        double separation = overlap / 2.0;
+                if (combat != null) {
+                        combat.renderEffects(gc);
+                }
 
-        if (distance >= 0) {
-            p1.shiftX(-separation);
-            p2.shiftX(separation);
-        } else {
-            p1.shiftX(separation);
-            p2.shiftX(-separation);
-        }
-    }
+                drawHUD(gc);
 
-    /**
-     * Finish the current round and update the match score.
-     *
-     * winner = 1: Player 1
-     * winner = 2: Player 2
-     * winner = 0: Draw
-     */
-    private void finishRound(int winner) {
-        // Prevent the same round from being scored twice.
-        if (roundOver) {
-            return;
+                if (roundOver) {
+                        drawRoundMessage(gc);
+                }
         }
 
-        roundOver = true;
+        private void drawArena(GraphicsContext gc) {
+                double width = Constants.WIDTH;
+                double height = Constants.HEIGHT;
+                double ground = Constants.GROUND_Y;
 
-        if (winner == 1) {
-            p1RoundsWon++;
-            roundMessage = "PLAYER 1 WINS THE ROUND!";
-        } else if (winner == 2) {
-            p2RoundsWon++;
-            roundMessage = "PLAYER 2 WINS THE ROUND!";
-        } else {
-            roundMessage = "DRAW!";
+                // Dark multiverse arena background.
+                gc.setFill(Color.rgb(9, 11, 25));
+                gc.fillRect(0, 0, width, height);
+
+                // Ambient blue and purple lighting.
+                gc.setFill(Color.rgb(35, 55, 125, 0.24));
+                gc.fillOval(
+                                width * 0.08,
+                                height * 0.12,
+                                width * 0.34,
+                                height * 0.50);
+
+                gc.setFill(Color.rgb(115, 35, 105, 0.20));
+                gc.fillOval(
+                                width * 0.58,
+                                height * 0.12,
+                                width * 0.34,
+                                height * 0.50);
+
+                // Floor.
+                gc.setFill(Color.rgb(19, 22, 39));
+                gc.fillRect(0, ground, width, height - ground);
+
+                gc.setStroke(Color.rgb(212, 175, 55, 0.8));
+                gc.setLineWidth(2);
+                gc.strokeLine(0, ground, width, ground);
+
+                // Floor perspective lines.
+                gc.setStroke(Color.rgb(100, 115, 160, 0.18));
+                gc.setLineWidth(1);
+
+                for (int x = 0; x < width; x += 50) {
+                        gc.strokeLine(x, ground, x - 40, height);
+                }
+
+                // Center arena line.
+                gc.setStroke(Color.rgb(212, 175, 55, 0.22));
+                gc.strokeLine(
+                                width / 2.0,
+                                ground,
+                                width / 2.0,
+                                height);
         }
 
-        boolean player1WonMatch = p1RoundsWon >= Constants.ROUNDS_TO_WIN;
+        private void drawHUD(GraphicsContext gc) {
+                if (p1 == null || p2 == null) {
+                        return;
+                }
 
-        boolean player2WonMatch = p2RoundsWon >= Constants.ROUNDS_TO_WIN;
+                double width = Constants.WIDTH;
+                double center = width / 2.0;
 
-        // Save the final result when the match is decided.
-        if (player1WonMatch) {
-            roundMessage = "PLAYER 1 WINS THE MATCH!";
+                // Player health bars.
+                drawHealthBar(
+                                gc,
+                                p1,
+                                40,
+                                35,
+                                HEALTH_BAR_WIDTH,
+                                p1DisplayedHealth,
+                                false);
 
-            engine.setMatchResult(
-                    p1.getName() + " WINS!",
-                    p1RoundsWon,
-                    p2RoundsWon);
+                drawHealthBar(
+                                gc,
+                                p2,
+                                width - 460,
+                                35,
+                                HEALTH_BAR_WIDTH,
+                                p2DisplayedHealth,
+                                true);
 
-        } else if (player2WonMatch) {
-            roundMessage = "PLAYER 2 WINS THE MATCH!";
+                // Mystic Energy meters.
+                drawKiBar(gc, p1, 40, 91, KI_BAR_WIDTH, false);
+                drawKiBar(gc, p2, width - 340, 91, KI_BAR_WIDTH, true);
 
-            engine.setMatchResult(
-                    p2.getName() + " WINS!",
-                    p1RoundsWon,
-                    p2RoundsWon);
-        }
-    }
+                // Round timer.
+                gc.setTextAlign(TextAlignment.CENTER);
+                gc.setFont(Font.font("Arial", 30));
+                gc.setFill(Color.WHITE);
 
-    @Override
-    public void render(GraphicsContext gc) {
-        drawArena(gc);
+                gc.fillText(
+                                String.format(
+                                                "%02d",
+                                                Math.max(0, (int) Math.ceil(timeRemaining))),
+                                center,
+                                52);
 
-        if (p1 == null || p2 == null) {
-            return;
-        }
+                // Current match score.
+                gc.setFont(Font.font("Arial", 17));
+                gc.setFill(Color.rgb(230, 230, 245));
 
-        // Draw fighters first.
-        p1.render(gc, false);
-        p2.render(gc, false);
+                gc.fillText(
+                                p1RoundsWon + "  -  " + p2RoundsWon,
+                                center,
+                                79);
 
-        // Draw impact effects above the fighters.
-        combat.renderEffects(gc);
+                // Two round-win pips per player.
+                drawRoundPips(gc, center - 45, 98, p1RoundsWon, false);
+                drawRoundPips(gc, center + 45, 98, p2RoundsWon, true);
 
-        // Draw the HUD and round overlay last.
-        drawHUD(gc);
-        drawRoundMessage(gc);
-    }
-
-    /**
-     * Draw the fighting arena.
-     */
-    private void drawArena(GraphicsContext gc) {
-        gc.setFill(Color.rgb(10, 13, 32));
-        gc.fillRect(
-                0, 0,
-                Constants.WIDTH,
-                Constants.HEIGHT);
-
-        // Background decorations.
-        gc.setFill(Color.rgb(36, 43, 76));
-        gc.fillOval(80, 80, 180, 180);
-
-        gc.fillOval(
-                Constants.WIDTH - 260,
-                80,
-                180,
-                180);
-
-        // Ground.
-        gc.setFill(Color.rgb(28, 31, 48));
-        gc.fillRect(
-                0,
-                Constants.GROUND_Y,
-                Constants.WIDTH,
-                Constants.HEIGHT - Constants.GROUND_Y);
-
-        gc.setStroke(Color.rgb(100, 105, 145));
-        gc.setLineWidth(2);
-
-        gc.strokeLine(
-                0,
-                Constants.GROUND_Y,
-                Constants.WIDTH,
-                Constants.GROUND_Y);
-
-        gc.setStroke(Color.rgb(65, 70, 100));
-        gc.setLineWidth(1);
-
-        gc.strokeLine(
-                Constants.WIDTH / 2.0,
-                Constants.GROUND_Y,
-                Constants.WIDTH / 2.0,
-                Constants.HEIGHT);
-    }
-
-    /**
-     * Draw health, Ki, timer, round score, and ultimate status.
-     */
-    private void drawHUD(GraphicsContext gc) {
-        drawHealthBar(gc, p1, 40, 35, 420, false);
-
-        drawHealthBar(
-                gc,
-                p2,
-                Constants.WIDTH - 460,
-                35,
-                420,
-                true);
-
-        drawKiBar(gc, p1, 40, 88, 300);
-
-        drawKiBar(
-                gc,
-                p2,
-                Constants.WIDTH - 340,
-                88,
-                300);
-
-        // Round timer.
-        gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Arial", 34));
-        gc.setTextAlign(TextAlignment.CENTER);
-
-        gc.fillText(
-                String.format(
-                        "%02d",
-                        (int) Math.ceil(timeRemaining)),
-                Constants.WIDTH / 2.0,
-                55);
-
-        // Match score.
-        gc.setFont(Font.font("Arial", 16));
-
-        gc.fillText(
-                p1RoundsWon + "  -  " + p2RoundsWon,
-                Constants.WIDTH / 2.0,
-                82);
-
-        // Player 1 ultimate status.
-        gc.setFont(Font.font("Arial", 12));
-        gc.setFill(
-                p1.isUltimateReady()
-                        ? Color.GOLD
-                        : Color.LIGHTGRAY);
-
-        gc.setTextAlign(TextAlignment.LEFT);
-
-        gc.fillText(
-                p1.isUltimateReady()
-                        ? "ULTIMATE READY [H]"
-                        : "ULTIMATE [H]",
-                40,
-                115);
-
-        // Player 2 ultimate status.
-        gc.setFill(
-                p2.isUltimateReady()
-                        ? Color.GOLD
-                        : Color.LIGHTGRAY);
-
-        gc.setTextAlign(TextAlignment.RIGHT);
-
-        gc.fillText(
-                p2.isUltimateReady()
-                        ? "ULTIMATE READY [;]"
-                        : "ULTIMATE [;]",
-                Constants.WIDTH - 40,
-                115);
-    }
-
-    /**
-     * Draw a health bar.
-     */
-    private void drawHealthBar(
-            GraphicsContext gc,
-            Fighter fighter,
-            double x,
-            double y,
-            double width,
-            boolean reverse) {
-
-        double height = 28;
-
-        double ratio = (double) fighter.getHealth()
-                / fighter.getMaxHealth();
-
-        ratio = Math.max(0, Math.min(1, ratio));
-
-        gc.setFill(Color.rgb(55, 35, 48));
-        gc.fillRoundRect(
-                x, y,
-                width, height,
-                8, 8);
-
-        gc.setFill(
-                ratio > 0.5
-                        ? Color.LIMEGREEN
-                        : ratio > 0.25
-                                ? Color.ORANGE
-                                : Color.RED);
-
-        double filledWidth = width * ratio;
-
-        double filledX = reverse
-                ? x + width - filledWidth
-                : x;
-
-        gc.fillRoundRect(
-                filledX, y,
-                filledWidth, height,
-                8, 8);
-
-        gc.setStroke(Color.WHITE);
-        gc.setLineWidth(1);
-
-        gc.strokeRoundRect(
-                x, y,
-                width, height,
-                8, 8);
-
-        gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Arial", 15));
-
-        gc.setTextAlign(
-                reverse
-                        ? TextAlignment.RIGHT
-                        : TextAlignment.LEFT);
-
-        gc.fillText(
-                fighter.getName()
-                        + "  "
-                        + fighter.getHealth()
-                        + "/"
-                        + fighter.getMaxHealth(),
-                reverse ? x + width : x,
-                y - 7);
-    }
-
-    /**
-     * Draw the Mystic Energy / Ki meter.
-     */
-    private void drawKiBar(
-            GraphicsContext gc,
-            Fighter fighter,
-            double x,
-            double y,
-            double width) {
-
-        double height = 12;
-
-        double ratio = fighter.getKi() / fighter.getMaxKi();
-
-        ratio = Math.max(0, Math.min(1, ratio));
-
-        gc.setFill(Color.rgb(38, 39, 57));
-        gc.fillRoundRect(
-                x, y,
-                width, height,
-                5, 5);
-
-        gc.setFill(
-                fighter.isUltimateReady()
-                        ? Color.GOLD
-                        : Color.rgb(40, 190, 255));
-
-        gc.fillRoundRect(
-                x, y,
-                width * ratio,
-                height,
-                5, 5);
-
-        gc.setStroke(Color.LIGHTGRAY);
-        gc.setLineWidth(1);
-
-        gc.strokeRoundRect(
-                x, y,
-                width, height,
-                5, 5);
-    }
-
-    /**
-     * Draw the round result overlay.
-     */
-    private void drawRoundMessage(GraphicsContext gc) {
-        if (!roundOver) {
-            return;
+                // Ultimate readiness indicator.
+                drawUltimateLabel(gc, p1, 40, 128, false);
+                drawUltimateLabel(gc, p2, width - 340, 128, true);
         }
 
-        gc.setFill(Color.rgb(0, 0, 0, 0.72));
-        gc.fillRect(
-                0,
-                Constants.HEIGHT / 2.0 - 75,
-                Constants.WIDTH,
-                150);
+        private void drawHealthBar(
+                        GraphicsContext gc,
+                        Fighter fighter,
+                        double x,
+                        double y,
+                        double barWidth,
+                        double displayedHealth,
+                        boolean reverse) {
 
-        gc.setTextAlign(TextAlignment.CENTER);
-        gc.setFont(Font.font("Arial", 32));
-        gc.setFill(Color.GOLD);
+                double barHeight = 22;
+                double maxHealth = Math.max(1, fighter.getMaxHealth());
 
-        gc.fillText(
-                roundMessage,
-                Constants.WIDTH / 2.0,
-                Constants.HEIGHT / 2.0 - 5);
+                double actualRatio = clamp(
+                                fighter.getHealth() / maxHealth, 0, 1);
 
-        gc.setFont(Font.font("Arial", 16));
-        gc.setFill(Color.WHITE);
+                double displayedRatio = clamp(
+                                displayedHealth / maxHealth, 0, 1);
 
-        boolean matchFinished = p1RoundsWon >= Constants.ROUNDS_TO_WIN
-                || p2RoundsWon >= Constants.ROUNDS_TO_WIN;
+                // Health-bar background.
+                gc.setFill(Color.rgb(35, 35, 48));
+                gc.fillRoundRect(
+                                x, y, barWidth, barHeight, 8, 8);
 
-        gc.fillText(
-                matchFinished
-                        ? "Press ENTER to view results"
-                        : "Press ENTER to start the next round",
-                Constants.WIDTH / 2.0,
-                Constants.HEIGHT / 2.0 + 35);
-    }
+                // Delayed red trail for recently lost health.
+                double trailWidth = barWidth * displayedRatio;
+
+                gc.setFill(Color.rgb(155, 35, 48));
+
+                if (reverse) {
+                        gc.fillRoundRect(
+                                        x + barWidth - trailWidth,
+                                        y,
+                                        trailWidth,
+                                        barHeight,
+                                        8,
+                                        8);
+                } else {
+                        gc.fillRoundRect(
+                                        x,
+                                        y,
+                                        trailWidth,
+                                        barHeight,
+                                        8,
+                                        8);
+                }
+
+                // Actual health fill.
+                Color healthColor;
+
+                if (actualRatio > 0.60) {
+                        healthColor = Color.rgb(50, 220, 125);
+                } else if (actualRatio > 0.30) {
+                        healthColor = Color.rgb(255, 175, 55);
+                } else {
+                        healthColor = Color.rgb(255, 65, 75);
+                }
+
+                double healthWidth = barWidth * actualRatio;
+
+                gc.setFill(healthColor);
+
+                if (reverse) {
+                        gc.fillRoundRect(
+                                        x + barWidth - healthWidth,
+                                        y,
+                                        healthWidth,
+                                        barHeight,
+                                        8,
+                                        8);
+                } else {
+                        gc.fillRoundRect(
+                                        x,
+                                        y,
+                                        healthWidth,
+                                        barHeight,
+                                        8,
+                                        8);
+                }
+
+                gc.setStroke(Color.rgb(220, 225, 245, 0.7));
+                gc.setLineWidth(1);
+                gc.strokeRoundRect(
+                                x, y, barWidth, barHeight, 8, 8);
+
+                // Display actual health numbers.
+                gc.setFont(Font.font("Arial", 13));
+                gc.setFill(Color.WHITE);
+                gc.setTextAlign(
+                                reverse ? TextAlignment.RIGHT : TextAlignment.LEFT);
+
+                gc.fillText(
+                                fighter.getName() + "  "
+                                                + fighter.getHealth() + " / "
+                                                + fighter.getMaxHealth(),
+                                reverse ? x + barWidth : x,
+                                y - 7);
+        }
+
+        private void drawKiBar(
+                        GraphicsContext gc,
+                        Fighter fighter,
+                        double x,
+                        double y,
+                        double barWidth,
+                        boolean reverse) {
+
+                double barHeight = 13;
+                double kiRatio = clamp(
+                                fighter.getKi() / fighter.getMaxKi(), 0, 1);
+
+                boolean ready = fighter.isUltimateReady();
+
+                // Pulsing golden outline when the ultimate is ready.
+                if (ready) {
+                        double pulse = 0.45 + 0.45
+                                        * (0.5 + 0.5 * Math.sin(hudPulseTime * 5));
+
+                        gc.setStroke(Color.rgb(255, 205, 65, pulse));
+                        gc.setLineWidth(4);
+
+                        gc.strokeRoundRect(
+                                        x - 2,
+                                        y - 2,
+                                        barWidth + 4,
+                                        barHeight + 4,
+                                        9,
+                                        9);
+                }
+
+                gc.setFill(Color.rgb(30, 32, 48));
+                gc.fillRoundRect(
+                                x, y, barWidth, barHeight, 7, 7);
+
+                gc.setFill(
+                                ready
+                                                ? Color.rgb(255, 205, 65)
+                                                : Color.rgb(65, 170, 255));
+
+                double fillWidth = barWidth * kiRatio;
+
+                if (reverse) {
+                        gc.fillRoundRect(
+                                        x + barWidth - fillWidth,
+                                        y,
+                                        fillWidth,
+                                        barHeight,
+                                        7,
+                                        7);
+                } else {
+                        gc.fillRoundRect(
+                                        x,
+                                        y,
+                                        fillWidth,
+                                        barHeight,
+                                        7,
+                                        7);
+                }
+
+                gc.setStroke(
+                                ready
+                                                ? Color.rgb(255, 225, 130)
+                                                : Color.rgb(130, 190, 255, 0.8));
+
+                gc.setLineWidth(1);
+                gc.strokeRoundRect(
+                                x, y, barWidth, barHeight, 7, 7);
+
+                gc.setFont(Font.font("Arial", 10));
+                gc.setFill(Color.WHITE);
+                gc.setTextAlign(
+                                reverse ? TextAlignment.RIGHT : TextAlignment.LEFT);
+
+                gc.fillText(
+                                "MYSTIC ENERGY  "
+                                                + (int) fighter.getKi() + "%",
+                                reverse ? x + barWidth : x,
+                                y - 4);
+        }
+
+        private void drawRoundPips(
+                        GraphicsContext gc,
+                        double centerX,
+                        double y,
+                        int roundsWon,
+                        boolean reverse) {
+
+                double radius = 5;
+                double spacing = 15;
+
+                for (int i = 0; i < 2; i++) {
+                        double offset = i * spacing;
+
+                        double x = reverse
+                                        ? centerX + offset
+                                        : centerX - offset;
+
+                        if (i < roundsWon) {
+                                gc.setFill(Color.rgb(255, 205, 65));
+                                gc.setStroke(Color.rgb(255, 235, 160));
+                        } else {
+                                gc.setFill(Color.rgb(45, 48, 65));
+                                gc.setStroke(Color.rgb(130, 135, 160));
+                        }
+
+                        gc.setLineWidth(1.2);
+
+                        gc.fillOval(
+                                        x - radius,
+                                        y - radius,
+                                        radius * 2,
+                                        radius * 2);
+
+                        gc.strokeOval(
+                                        x - radius,
+                                        y - radius,
+                                        radius * 2,
+                                        radius * 2);
+                }
+        }
+
+        private void drawUltimateLabel(
+                        GraphicsContext gc,
+                        Fighter fighter,
+                        double x,
+                        double y,
+                        boolean rightAligned) {
+
+                boolean ready = fighter.isUltimateReady();
+
+                gc.setFont(Font.font("Arial", 12));
+                gc.setTextAlign(
+                                rightAligned
+                                                ? TextAlignment.RIGHT
+                                                : TextAlignment.LEFT);
+
+                if (ready) {
+                        double pulse = 0.65 + 0.35
+                                        * (0.5 + 0.5 * Math.sin(hudPulseTime * 5));
+
+                        gc.setFill(Color.rgb(255, 215, 80, pulse));
+
+                        gc.fillText(
+                                        rightAligned
+                                                        ? "ULTIMATE READY  [;]"
+                                                        : "ULTIMATE READY  [H]",
+                                        x,
+                                        y);
+                } else {
+                        gc.setFill(Color.rgb(175, 185, 210));
+
+                        gc.fillText(
+                                        rightAligned
+                                                        ? "ULTIMATE  [;]"
+                                                        : "ULTIMATE  [H]",
+                                        x,
+                                        y);
+                }
+        }
+
+        private void drawRoundMessage(GraphicsContext gc) {
+                gc.setFill(Color.rgb(0, 0, 0, 0.78));
+                gc.fillRect(
+                                0,
+                                0,
+                                Constants.WIDTH,
+                                Constants.HEIGHT);
+
+                gc.setTextAlign(TextAlignment.CENTER);
+                gc.setFont(Font.font("Arial", 34));
+                gc.setFill(Color.rgb(255, 215, 90));
+
+                gc.fillText(
+                                roundMessage,
+                                Constants.WIDTH / 2.0,
+                                Constants.HEIGHT / 2.0 - 25);
+
+                gc.setFont(Font.font("Arial", 18));
+                gc.setFill(Color.WHITE);
+
+                boolean matchFinished = p1RoundsWon >= 2 || p2RoundsWon >= 2;
+
+                gc.fillText(
+                                matchFinished
+                                                ? "Press ENTER to view results"
+                                                : "Press ENTER to continue",
+                                Constants.WIDTH / 2.0,
+                                Constants.HEIGHT / 2.0 + 25);
+        }
+
+        private double clamp(
+                        double value,
+                        double min,
+                        double max) {
+
+                return Math.max(min, Math.min(max, value));
+        }
 }
