@@ -1,10 +1,10 @@
-
 package mystic.fighters;
 
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
+
 import mystic.combat.AttackType;
 import mystic.common.Action;
 import mystic.common.Constants;
@@ -14,6 +14,7 @@ import mystic.engine.InputManager;
 
 /** Shared behaviour of every fighter. */
 public abstract class Fighter {
+
     public static final double WIDTH = 64;
     public static final double STAND_HEIGHT = 96;
     public static final double CROUCH_HEIGHT = 56;
@@ -27,8 +28,8 @@ public abstract class Fighter {
     private static final double ULTIMATE_RANGE = 220.0;
     private static final double ULTIMATE_EFFECT_DURATION = 0.65;
 
-    // How long the player can buffer their next attack.
     private static final double INPUT_BUFFER_SECONDS = 0.20;
+    private static final double HIT_FLASH_DURATION = 0.10;
 
     protected final String name;
     protected final int maxHealth;
@@ -45,6 +46,7 @@ public abstract class Fighter {
     protected double vy;
     protected double knockbackVx;
     protected double hitstunTimer;
+
     protected boolean onGround = true;
     protected boolean facingRight;
     protected FighterState state = FighterState.IDLE;
@@ -62,6 +64,9 @@ public abstract class Fighter {
     private boolean ultimateActive = false;
     private double ultimateEffectTimer = 0.0;
 
+    // Brief visual feedback when damage is received.
+    private double hitFlashTimer = 0.0;
+
     protected Fighter(
             String name,
             int maxHealth,
@@ -70,6 +75,7 @@ public abstract class Fighter {
             int player,
             double startX,
             Color color) {
+
         this.name = name;
         this.maxHealth = maxHealth;
         this.speed = speed;
@@ -84,11 +90,14 @@ public abstract class Fighter {
     /** Reset the fighter and Ki meter for a new round. */
     public final void resetForRound() {
         health = maxHealth;
+
         x = startX;
         y = Constants.GROUND_Y;
+
         vy = 0;
         knockbackVx = 0;
         hitstunTimer = 0;
+
         onGround = true;
 
         currentAttack = null;
@@ -102,6 +111,8 @@ public abstract class Fighter {
         ultimateActive = false;
         ultimateEffectTimer = 0;
 
+        hitFlashTimer = 0;
+
         state = FighterState.IDLE;
         facingRight = startX < Constants.WIDTH / 2.0;
     }
@@ -111,20 +122,30 @@ public abstract class Fighter {
      * Override this method in a fighter class for custom behaviour.
      */
     public void useUltimate() {
-        // Character-specific ultimate behaviour can be added here.
+        // Add character-specific ultimate behaviour in subclasses.
     }
 
-    public void update(double dt, InputManager input, Fighter opponent) {
+    public void update(
+            double dt,
+            InputManager input,
+            Fighter opponent) {
+
+        if (!Double.isFinite(dt) || dt <= 0) {
+            return;
+        }
+
         updateUltimateEffect(dt);
+        updateHitFlash(dt);
 
         if (state == FighterState.KO) {
             physics(dt, 0);
             return;
         }
 
-        // Hit-stun prevents movement and attacks.
+        // Hitstun prevents movement and attacks.
         if (hitstunTimer > 0) {
             hitstunTimer -= dt;
+
             state = FighterState.HITSTUN;
             physics(dt, 0);
 
@@ -132,20 +153,24 @@ public abstract class Fighter {
                 hitstunTimer = 0;
                 state = FighterState.IDLE;
             }
+
             return;
         }
 
         boolean crouching = onGround && input.isDown(player, Action.CROUCH);
 
-        // Continue the current attack and accept buffered attack inputs.
+        // Continue the current attack and accept buffered inputs.
         if (currentAttack != null) {
+
             if (!crouching) {
                 if (input.wasPressed(player, Action.HEAVY)) {
                     bufferedAttack = AttackType.HEAVY;
                     bufferedAttackTimer = INPUT_BUFFER_SECONDS;
+
                 } else if (input.wasPressed(player, Action.LIGHT)) {
                     bufferedAttack = AttackType.LIGHT;
                     bufferedAttackTimer = INPUT_BUFFER_SECONDS;
+
                 } else if (bufferedAttack != null) {
                     bufferedAttackTimer -= dt;
 
@@ -154,6 +179,7 @@ public abstract class Fighter {
                         bufferedAttackTimer = 0;
                     }
                 }
+
             } else {
                 bufferedAttack = null;
                 bufferedAttackTimer = 0;
@@ -165,18 +191,22 @@ public abstract class Fighter {
             if (attackTimer >= currentAttack.total()) {
                 currentAttack = null;
 
-                // Start the buffered attack if its input has not expired.
-                if (bufferedAttack != null && bufferedAttackTimer > 0) {
+                // Start the buffered attack if it has not expired.
+                if (bufferedAttack != null
+                        && bufferedAttackTimer > 0) {
+
                     AttackType nextAttack = bufferedAttack;
 
                     bufferedAttack = null;
                     bufferedAttackTimer = 0;
 
                     startAttack(nextAttack);
+
                 } else {
                     state = FighterState.IDLE;
                 }
             }
+
             return;
         }
 
@@ -214,8 +244,10 @@ public abstract class Fighter {
         }
 
         // Jump only on a fresh key press.
-        if (onGround && !crouching
+        if (onGround
+                && !crouching
                 && input.wasPressed(player, Action.JUMP)) {
+
             vy = -JUMP_SPEED;
             onGround = false;
         }
@@ -225,10 +257,13 @@ public abstract class Fighter {
         // Update the fighter's animation state.
         if (!onGround) {
             state = FighterState.JUMP;
+
         } else if (crouching) {
             state = FighterState.CROUCH;
+
         } else if (dir != 0) {
             state = FighterState.WALK;
+
         } else {
             state = FighterState.IDLE;
         }
@@ -252,6 +287,7 @@ public abstract class Fighter {
 
         if (Math.abs(knockbackVx) <= slow) {
             knockbackVx = 0;
+
         } else {
             knockbackVx -= Math.signum(knockbackVx) * slow;
         }
@@ -274,16 +310,26 @@ public abstract class Fighter {
     }
 
     /** Called when the fighter receives a successful hit. */
-    public void takeHit(int amount, double stunSeconds, double knockback) {
+    public void takeHit(
+            int amount,
+            double stunSeconds,
+            double knockback) {
+
         if (state == FighterState.KO) {
             return;
         }
 
-        int actualDamage = Math.min(health, Math.max(0, amount));
+        int actualDamage = Math.min(
+                health,
+                Math.max(0, amount));
+
         health -= actualDamage;
 
         // Taking damage also generates Mystic Energy.
         gainKi(actualDamage * 0.7);
+
+        // Trigger a brief white flash.
+        hitFlashTimer = HIT_FLASH_DURATION;
 
         // Being hit cancels the current attack and buffered input.
         currentAttack = null;
@@ -293,20 +339,36 @@ public abstract class Fighter {
         bufferedAttack = null;
         bufferedAttackTimer = 0;
 
-        knockbackVx = knockback;
+        knockbackVx = Double.isFinite(knockback)
+                ? knockback
+                : 0;
 
         if (health == 0) {
             state = FighterState.KO;
             hitstunTimer = 0;
+
         } else {
             state = FighterState.HITSTUN;
-            hitstunTimer = stunSeconds;
+
+            hitstunTimer = Double.isFinite(stunSeconds)
+                    ? Math.max(0, stunSeconds)
+                    : 0;
+        }
+    }
+
+    private void updateHitFlash(double dt) {
+        if (hitFlashTimer > 0) {
+            hitFlashTimer = Math.max(0, hitFlashTimer - dt);
         }
     }
 
     /** Add Ki, capped at 100. */
     public void gainKi(double amount) {
-        ki = Math.min(MAX_KI, ki + Math.max(0, amount));
+        if (!Double.isFinite(amount) || amount <= 0) {
+            return;
+        }
+
+        ki = Math.min(MAX_KI, ki + amount);
     }
 
     public double getKi() {
@@ -326,13 +388,16 @@ public abstract class Fighter {
      * Returns false if the ultimate cannot be activated.
      */
     public boolean consumeKiForUltimate() {
-        if (!isUltimateReady() || ultimateActive || isKO()) {
+        if (!isUltimateReady()
+                || ultimateActive
+                || isKO()) {
             return false;
         }
 
         ki = 0;
         ultimateActive = true;
         ultimateEffectTimer = ULTIMATE_EFFECT_DURATION;
+
         return true;
     }
 
@@ -341,6 +406,10 @@ public abstract class Fighter {
     }
 
     public void updateUltimateEffect(double dt) {
+        if (!Double.isFinite(dt) || dt <= 0) {
+            return;
+        }
+
         if (ultimateEffectTimer > 0) {
             ultimateEffectTimer -= dt;
 
@@ -360,9 +429,15 @@ public abstract class Fighter {
     }
 
     public void shiftX(double amount) {
+        if (!Double.isFinite(amount)) {
+            return;
+        }
+
         x = Math.max(
                 WIDTH / 2,
-                Math.min(Constants.WIDTH - WIDTH / 2, x + amount));
+                Math.min(
+                        Constants.WIDTH - WIDTH / 2,
+                        x + amount));
     }
 
     public Rect getHurtbox() {
@@ -374,7 +449,11 @@ public abstract class Fighter {
                 ? CROUCH_HEIGHT
                 : STAND_HEIGHT;
 
-        return new Rect(x - WIDTH / 2, y - h, WIDTH, h);
+        return new Rect(
+                x - WIDTH / 2,
+                y - h,
+                WIDTH,
+                h);
     }
 
     public Rect getHitbox() {
@@ -421,7 +500,7 @@ public abstract class Fighter {
                 damage * currentAttack.damageMultiplier);
     }
 
-    /** Draw the fighter and its temporary ultimate effect. */
+    /** Draw the fighter and temporary visual effects. */
     public void render(GraphicsContext gc, boolean debug) {
         Rect hb = getHurtbox();
 
@@ -429,6 +508,11 @@ public abstract class Fighter {
 
         if (state == FighterState.KO) {
             body = color.darker().darker();
+
+        } else if (hitFlashTimer > 0) {
+            // A short white flash makes successful hits easier to see.
+            body = Color.WHITE;
+
         } else if (state == FighterState.HITSTUN) {
             body = color.brighter();
         }
@@ -436,7 +520,13 @@ public abstract class Fighter {
         if (ultimateActive) {
             gc.setStroke(Color.GOLD);
             gc.setLineWidth(5);
-            gc.strokeOval(x - 65, y - 105, 130, 115);
+
+            gc.strokeOval(
+                    x - 65,
+                    y - 105,
+                    130,
+                    115);
+
             gc.setLineWidth(1);
         }
 
@@ -449,24 +539,40 @@ public abstract class Fighter {
                 ? hb.x() + hb.w() - 18
                 : hb.x() + 6;
 
-        gc.fillRect(eyeX, hb.y() + 14, 12, 10);
+        gc.fillRect(
+                eyeX,
+                hb.y() + 14,
+                12,
+                10);
 
         Rect hit = getHitbox();
 
         if (hit != null) {
             gc.setFill(Color.YELLOW);
-            gc.fillRect(hit.x(), hit.y(), hit.w(), hit.h());
+            gc.fillRect(
+                    hit.x(),
+                    hit.y(),
+                    hit.w(),
+                    hit.h());
         }
 
         if (debug) {
             gc.setStroke(Color.LIMEGREEN);
-            gc.strokeRect(hb.x(), hb.y(), hb.w(), hb.h());
+            gc.strokeRect(
+                    hb.x(),
+                    hb.y(),
+                    hb.w(),
+                    hb.h());
         }
 
         gc.setFill(Color.WHITE);
         gc.setTextAlign(TextAlignment.CENTER);
         gc.setFont(Font.font("Arial", 14));
-        gc.fillText(name + " (" + state + ")", x, hb.y() - 8);
+
+        gc.fillText(
+                name + " (" + state + ")",
+                x,
+                hb.y() - 8);
     }
 
     public String getName() {

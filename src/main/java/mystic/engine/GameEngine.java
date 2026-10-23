@@ -16,7 +16,7 @@ import mystic.fighters.ShadowVigilante;
 
 /**
  * The heart of the game: manages the game loop,
- * screen switching, and selected fighters.
+ * screen switching, selected fighters, and match results.
  */
 public class GameEngine {
 
@@ -26,6 +26,11 @@ public class GameEngine {
     private final Map<GameState, Screen> screens = new EnumMap<>(GameState.class);
 
     private GameState state = GameState.MENU;
+
+    // Results from the most recently completed match.
+    private String matchWinner = "";
+    private int player1MatchWins;
+    private int player2MatchWins;
 
     /** 1.0 = normal speed; below 1.0 = slow motion. */
     private double timeScale = 1.0;
@@ -69,6 +74,37 @@ public class GameEngine {
 
     public void setTimeScale(double timeScale) {
         this.timeScale = Math.max(0.0, timeScale);
+    }
+
+    // ---------------- MATCH RESULTS ----------------
+
+    /**
+     * Store the result of a completed match.
+     *
+     * @param winner      display text for the winning fighter
+     * @param player1Wins rounds won by Player 1
+     * @param player2Wins rounds won by Player 2
+     */
+    public void setMatchResult(
+            String winner,
+            int player1Wins,
+            int player2Wins) {
+
+        this.matchWinner = winner;
+        this.player1MatchWins = player1Wins;
+        this.player2MatchWins = player2Wins;
+    }
+
+    public String getMatchWinner() {
+        return matchWinner;
+    }
+
+    public int getPlayer1MatchWins() {
+        return player1MatchWins;
+    }
+
+    public int getPlayer2MatchWins() {
+        return player2MatchWins;
     }
 
     // ---------------- CHARACTER SELECTION ----------------
@@ -121,7 +157,9 @@ public class GameEngine {
                     return;
                 }
 
-                double dt = (now - lastNanos) / 1_000_000_000.0;
+                double dt = (now - lastNanos)
+                        / 1_000_000_000.0;
+
                 lastNanos = now;
 
                 // Avoid a large update after a pause or lag spike.
@@ -141,7 +179,11 @@ public class GameEngine {
         }
 
         gc.setFill(Color.BLACK);
-        gc.fillRect(0, 0, Constants.WIDTH, Constants.HEIGHT);
+        gc.fillRect(
+                0,
+                0,
+                Constants.WIDTH,
+                Constants.HEIGHT);
 
         if (screen != null) {
             screen.render(gc);

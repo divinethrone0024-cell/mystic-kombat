@@ -1,4 +1,3 @@
-
 package mystic.combat;
 
 import java.util.ArrayList;
@@ -14,8 +13,8 @@ import mystic.common.Rect;
 import mystic.fighters.Fighter;
 
 /**
- * Handles normal attacks, combo tracking, damage scaling,
- * Ultimate Incantations, and combat impact effects.
+ * Handles attacks, combo tracking, damage scaling,
+ * Ultimate Incantations, hit-stop, and impact effects.
  */
 public class CombatSystem {
 
@@ -28,10 +27,17 @@ public class CombatSystem {
     private static final double MIN_DAMAGE_MULTIPLIER = 0.50;
 
     private static final double IMPACT_DURATION = 0.22;
+    private static final double LIGHT_HIT_STOP = 0.045;
+    private static final double HEAVY_HIT_STOP = 0.075;
+    private static final double ULTIMATE_HIT_STOP = 0.12;
+
+    private static final int MAX_IMPACT_EFFECTS = 40;
 
     private final Map<Fighter, ComboData> combos = new IdentityHashMap<>();
 
     private final List<ImpactEffect> impactEffects = new ArrayList<>();
+
+    private double hitStopTimer;
 
     private static class ComboData {
         private final Fighter target;
@@ -52,22 +58,36 @@ public class CombatSystem {
         private final double x;
         private final double y;
         private final boolean ultimate;
+        private final Color color;
+        private final double direction;
+
         private double timer = IMPACT_DURATION;
 
         private ImpactEffect(
                 double x,
                 double y,
-                boolean ultimate) {
+                boolean ultimate,
+                Color color,
+                double direction) {
+
             this.x = x;
             this.y = y;
             this.ultimate = ultimate;
+            this.color = color;
+            this.direction = direction;
         }
     }
 
     /**
-     * Update combo timers and impact effects once per frame.
+     * Update combo timers, hit-stop, and impact effects once per frame.
      */
     public void update(double dt) {
+        if (!Double.isFinite(dt) || dt <= 0) {
+            return;
+        }
+
+        hitStopTimer = Math.max(0, hitStopTimer - dt);
+
         Iterator<Map.Entry<Fighter, ComboData>> comboIterator = combos.entrySet().iterator();
 
         while (comboIterator.hasNext()) {
@@ -80,6 +100,16 @@ public class CombatSystem {
         }
 
         updateEffects(dt);
+    }
+
+    /**
+     * Returns true while the combat system's hit-stop timer is active.
+     *
+     * CombatScreen can use this to pause fighter updates briefly
+     * without stopping the round timer or the whole game loop.
+     */
+    public boolean isHitStopActive() {
+        return hitStopTimer > 0;
     }
 
     /**
@@ -98,10 +128,11 @@ public class CombatSystem {
     }
 
     /**
-     * Clear all temporary impact effects.
+     * Clear temporary effects and hit-stop at round reset.
      */
     public void resetEffects() {
         impactEffects.clear();
+        hitStopTimer = 0;
     }
 
     /**
@@ -144,20 +175,50 @@ public class CombatSystem {
     }
 
     /**
+     * Start a short hit-stop interval.
+     * A stronger hit can extend the current interval.
+     */
+    private void triggerHitStop(double duration) {
+        hitStopTimer = Math.max(hitStopTimer, duration);
+    }
+
+    /**
      * Add a temporary impact effect at the hit location.
      */
     private void addImpactEffect(
             Fighter attacker,
             Fighter defender,
-            boolean ultimate) {
+            boolean ultimate,
+            AttackType attack) {
 
         double impactX = (attacker.getX() + defender.getX()) / 2.0;
 
-        double impactY = defender.getY()
-                - (ultimate ? 50 : 45);
+        double impactY = defender.getY() - (ultimate ? 50 : 45);
+
+        Color effectColor;
+
+        if (ultimate) {
+            effectColor = Color.GOLD;
+        } else if (attack == AttackType.HEAVY) {
+            effectColor = Color.ORANGERED;
+        } else {
+            effectColor = Color.CYAN;
+        }
+
+        double direction = attacker.isFacingRight() ? 1.0 : -1.0;
+
+        // Prevent the temporary effect list from growing indefinitely.
+        if (impactEffects.size() >= MAX_IMPACT_EFFECTS) {
+            impactEffects.remove(0);
+        }
 
         impactEffects.add(
-                new ImpactEffect(impactX, impactY, ultimate));
+                new ImpactEffect(
+                        impactX,
+                        impactY,
+                        ultimate,
+                        effectColor,
+                        direction));
     }
 
     /**
@@ -180,22 +241,21 @@ public class CombatSystem {
             return;
         }
 
-        attacker.markHit();
-
         AttackType attack = attacker.getCurrentAttack();
 
         if (attack == null) {
             return;
         }
 
-        double direction = attacker.isFacingRight() ? 1.0 : -1.0;
+        // Mark the attack as having connected so it cannot hit repeatedly.
+        attacker.markHit();
 
-        int baseDamage = attacker.attackDamage();
+        double direction = attacker.isFacingRight() ? 1.0 : -1.0;
 
         int damage = registerHit(
                 attacker,
                 defender,
-                baseDamage);
+                attacker.attackDamage());
 
         // Being hit interrupts the defender's combo.
         breakCombo(defender);
@@ -205,8 +265,13 @@ public class CombatSystem {
                 attack.hitstun,
                 direction * attack.knockback);
 
-        // Show an impact ring and sparks.
-        addImpactEffect(attacker, defender, false);
+        addImpactEffect(attacker, defender, false, attack);
+
+        if (attack == AttackType.HEAVY) {
+            triggerHitStop(HEAVY_HIT_STOP);
+        } else {
+            triggerHitStop(LIGHT_HIT_STOP);
+        }
 
         // Reward the attacker with Mystic Energy.
         attacker.gainKi(damage * 0.5);
@@ -241,7 +306,7 @@ public class CombatSystem {
             return false;
         }
 
-        // Consume Ki only after activation conditions pass.
+        // Consume Ki only after all activation conditions pass.
         if (!attacker.consumeKiForUltimate()) {
             return false;
         }
@@ -256,7 +321,6 @@ public class CombatSystem {
                 defender,
                 ULTIMATE_DAMAGE);
 
-        // The defender's combo is interrupted.
         breakCombo(defender);
 
         defender.takeHit(
@@ -264,8 +328,8 @@ public class CombatSystem {
                 ULTIMATE_STUN,
                 direction * ULTIMATE_KNOCKBACK);
 
-        // A larger golden effect marks the ultimate impact.
-        addImpactEffect(attacker, defender, true);
+        addImpactEffect(attacker, defender, true, null);
+        triggerHitStop(ULTIMATE_HIT_STOP);
 
         return true;
     }
@@ -274,6 +338,10 @@ public class CombatSystem {
      * Update and expire temporary impact effects.
      */
     public void updateEffects(double dt) {
+        if (!Double.isFinite(dt) || dt <= 0) {
+            return;
+        }
+
         Iterator<ImpactEffect> iterator = impactEffects.iterator();
 
         while (iterator.hasNext()) {
@@ -287,58 +355,78 @@ public class CombatSystem {
     }
 
     /**
-     * Render impact rings and radial sparks.
-     *
-     * Call this after rendering the fighters so that
-     * the effects appear in front of them.
+     * Render expanding impact rings and radial sparks.
+     * Call after rendering the fighters.
      */
     public void renderEffects(GraphicsContext gc) {
-        for (ImpactEffect effect : impactEffects) {
-            double progress = Math.max(
-                    0,
-                    Math.min(1,
-                            effect.timer / IMPACT_DURATION));
+        gc.save();
 
-            double radius = effect.ultimate
-                    ? 24 * (1 - progress) + 8
-                    : 12 * (1 - progress) + 4;
+        try {
+            for (ImpactEffect effect : impactEffects) {
+                double progress = Math.max(
+                        0,
+                        Math.min(
+                                1,
+                                effect.timer / IMPACT_DURATION));
 
-            Color effectColor = effect.ultimate
-                    ? Color.GOLD
-                    : Color.ORANGE;
+                double elapsed = 1.0 - progress;
 
-            gc.setGlobalAlpha(progress);
-            gc.setStroke(effectColor);
-            gc.setLineWidth(effect.ultimate ? 4 : 2);
+                double radius = effect.ultimate
+                        ? 28 * elapsed + 8
+                        : 14 * elapsed + 4;
 
-            // Expanding impact ring.
-            gc.strokeOval(
-                    effect.x - radius,
-                    effect.y - radius,
-                    radius * 2,
-                    radius * 2);
+                double alpha = progress;
 
-            // Radial sparks.
-            int rays = effect.ultimate ? 12 : 8;
+                gc.setGlobalAlpha(alpha);
+                gc.setStroke(effect.color);
+                gc.setFill(effect.color);
+                gc.setLineWidth(effect.ultimate ? 4 : 2);
 
-            for (int i = 0; i < rays; i++) {
-                double angle = Math.PI * 2 * i / rays;
+                // Expanding impact ring.
+                gc.strokeOval(
+                        effect.x - radius,
+                        effect.y - radius,
+                        radius * 2,
+                        radius * 2);
 
-                double inner = radius * 0.7;
+                int rays = effect.ultimate ? 14 : 8;
 
-                double outer = radius
-                        * (effect.ultimate ? 1.8 : 1.5);
+                for (int i = 0; i < rays; i++) {
+                    double angle = (Math.PI * 2 * i / rays)
+                            + (effect.direction < 0
+                                    ? Math.PI / 8
+                                    : 0);
 
-                gc.strokeLine(
-                        effect.x + Math.cos(angle) * inner,
-                        effect.y + Math.sin(angle) * inner,
-                        effect.x + Math.cos(angle) * outer,
-                        effect.y + Math.sin(angle) * outer);
+                    double inner = radius * 0.65;
+
+                    double outer = radius
+                            * (effect.ultimate ? 2.0 : 1.6);
+
+                    double startX = effect.x + Math.cos(angle) * inner;
+                    double startY = effect.y + Math.sin(angle) * inner;
+
+                    double endX = effect.x + Math.cos(angle) * outer;
+                    double endY = effect.y + Math.sin(angle) * outer;
+
+                    gc.strokeLine(
+                            startX,
+                            startY,
+                            endX,
+                            endY);
+
+                    // Small spark at the end of each ray.
+                    double sparkSize = effect.ultimate ? 4 : 2.5;
+
+                    gc.fillOval(
+                            endX - sparkSize / 2,
+                            endY - sparkSize / 2,
+                            sparkSize,
+                            sparkSize);
+                }
             }
+        } finally {
+            // Restore all graphics settings for the HUD and next frame.
+            gc.restore();
         }
-
-        // Do not leak drawing state into the rest of the HUD.
-        gc.setGlobalAlpha(1.0);
-        gc.setLineWidth(1);
     }
 }
