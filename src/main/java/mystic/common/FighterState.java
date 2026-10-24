@@ -6,9 +6,12 @@ public enum FighterState {
     WALK,
     JUMP,
     CROUCH,
+    DASHING,
+    DODGING,
     ATTACK_LIGHT,
     ATTACK_HEAVY,
     HITSTUN,
     ULTIMATE,
-    KO
+    KO,
+    BLOCKING
 }

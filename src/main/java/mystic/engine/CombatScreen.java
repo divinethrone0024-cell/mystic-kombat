@@ -11,6 +11,7 @@ import mystic.common.Action;
 import mystic.common.Constants;
 import mystic.common.GameState;
 import mystic.combat.CombatSystem;
+import mystic.combat.UltimateEffect;
 import mystic.fighters.Fighter;
 
 public class CombatScreen implements Screen {
@@ -18,6 +19,8 @@ public class CombatScreen implements Screen {
         private final GameEngine engine;
         private final PauseMenuScreen pauseMenu = new PauseMenuScreen();
         private boolean paused = false;
+
+        private final MysticArenaRenderer arenaRenderer = new MysticArenaRenderer();
 
         private CombatSystem combat;
         private Fighter p1;
@@ -39,6 +42,11 @@ public class CombatScreen implements Screen {
         private static final double HEALTH_BAR_WIDTH = 420;
         private static final double KI_BAR_WIDTH = 300;
 
+        // Round intro animation.
+        private static final double ROUND_INTRO_DURATION = 2.2;
+        private static final double FIGHT_ANNOUNCEMENT_TIME = 1.2;
+        private double roundIntroTimer;
+
         // Ultimate cinematic settings.
         private static final double ULTIMATE_CINEMATIC_DURATION = 1.25;
         private static final double ULTIMATE_FLASH_DURATION = 0.16;
@@ -48,6 +56,9 @@ public class CombatScreen implements Screen {
 
         private String ultimateFighterName = "";
         private int ultimatePlayer;
+
+        // Character-specific ultimate visual effect.
+        private UltimateEffect ultimateEffect;
 
         public CombatScreen(GameEngine engine) {
                 this.engine = engine;
@@ -80,6 +91,7 @@ public class CombatScreen implements Screen {
                 ultimateFlashTimer = 0;
                 ultimateFighterName = "";
                 ultimatePlayer = 0;
+                ultimateEffect = null;
 
                 startRound();
         }
@@ -98,6 +110,8 @@ public class CombatScreen implements Screen {
                 roundOver = false;
                 roundMessage = "";
 
+                roundIntroTimer = ROUND_INTRO_DURATION;
+
                 p1DisplayedHealth = p1.getHealth();
                 p2DisplayedHealth = p2.getHealth();
 
@@ -105,6 +119,9 @@ public class CombatScreen implements Screen {
                 ultimateFlashTimer = 0;
                 ultimateFighterName = "";
                 ultimatePlayer = 0;
+
+                // Clear any ultimate animation from the previous round.
+                ultimateEffect = null;
         }
 
         @Override
@@ -117,7 +134,7 @@ public class CombatScreen implements Screen {
                                 0,
                                 Math.min(dt, 0.05));
 
-                // Handle pause input before any gameplay timers or fighters update.
+                // Handle pause input before gameplay timers or fighters update.
                 if (paused) {
                         PauseMenuScreen.Choice choice = pauseMenu.update(input);
 
@@ -133,7 +150,7 @@ public class CombatScreen implements Screen {
                         return;
                 }
 
-                // Pause only during an active round, not on the round-result screen.
+                // Pause only during an active round.
                 if (!roundOver && input.wasPressed(KeyCode.ESCAPE)) {
                         paused = true;
                         pauseMenu.reset();
@@ -145,6 +162,12 @@ public class CombatScreen implements Screen {
                 updateDisplayedHealth(safeDt);
                 combat.update(safeDt);
                 updateUltimateCinematic(safeDt);
+
+                // Freeze gameplay until the round intro finishes.
+                if (!roundOver && roundIntroTimer > 0) {
+                        roundIntroTimer = Math.max(0, roundIntroTimer - safeDt);
+                        return;
+                }
 
                 // Wait for the player to continue after a round.
                 if (roundOver) {
@@ -161,14 +184,14 @@ public class CombatScreen implements Screen {
                         return;
                 }
 
-                // Player 1 Ultimate Incantation: H.
+                // Player 1 Ultimate Incantation.
                 if (input.wasPressed(1, Action.ULTIMATE)) {
                         if (combat.activateUltimate(p1, p2)) {
                                 startUltimateCinematic(p1, 1);
                         }
                 }
 
-                // Player 2 Ultimate Incantation: semicolon.
+                // Player 2 Ultimate Incantation.
                 if (input.wasPressed(2, Action.ULTIMATE)) {
                         if (combat.activateUltimate(p2, p1)) {
                                 startUltimateCinematic(p2, 2);
@@ -203,16 +226,21 @@ public class CombatScreen implements Screen {
                 }
         }
 
-        // Start the ultimate cinematic only after successful activation.
+        // Start the cinematic and the fighter-specific ultimate effect.
         private void startUltimateCinematic(Fighter fighter, int player) {
                 ultimateCinematicTimer = ULTIMATE_CINEMATIC_DURATION;
                 ultimateFlashTimer = ULTIMATE_FLASH_DURATION;
 
                 ultimateFighterName = fighter.getName();
                 ultimatePlayer = player;
+
+                // Create the effect using the fighter's assigned UltimateType.
+                ultimateEffect = new UltimateEffect(
+                                fighter,
+                                fighter.getUltimateType());
         }
 
-        // Fade the cinematic and flash independently.
+        // Fade the cinematic and flash while animating the ultimate effect.
         private void updateUltimateCinematic(double dt) {
                 ultimateCinematicTimer = Math.max(
                                 0,
@@ -221,6 +249,14 @@ public class CombatScreen implements Screen {
                 ultimateFlashTimer = Math.max(
                                 0,
                                 ultimateFlashTimer - dt);
+
+                if (ultimateEffect != null) {
+                        ultimateEffect.update(dt);
+
+                        if (ultimateEffect.isFinished()) {
+                                ultimateEffect = null;
+                        }
+                }
         }
 
         // Smooth the health-bar animation after damage.
@@ -339,6 +375,11 @@ public class CombatScreen implements Screen {
                 // Keep the HUD stable during screen shake.
                 drawHUD(gc);
 
+                // Render the character-specific ultimate animation.
+                if (ultimateEffect != null) {
+                        ultimateEffect.render(gc);
+                }
+
                 // Show the round result after the cinematic finishes.
                 if (roundOver && ultimateCinematicTimer <= 0) {
                         drawRoundMessage(gc);
@@ -346,6 +387,11 @@ public class CombatScreen implements Screen {
 
                 // Render the cinematic above the arena and HUD.
                 drawUltimateCinematic(gc);
+
+                // Display the round intro above the arena and HUD.
+                if (!roundOver && roundIntroTimer > 0) {
+                        drawRoundIntro(gc);
+                }
 
                 // The pause overlay must be the topmost layer.
                 if (paused) {
@@ -492,7 +538,7 @@ public class CombatScreen implements Screen {
                                 p2RoundsWon,
                                 true);
 
-                // Ultimate readiness indicators.
+                // Ultimate readiness indicators and blocking controls.
                 drawUltimateLabel(
                                 gc,
                                 p1,
@@ -503,24 +549,26 @@ public class CombatScreen implements Screen {
                 drawUltimateLabel(
                                 gc,
                                 p2,
-                                width - 340,
+                                width - 40,
                                 128,
                                 true);
 
                 // Combo counters.
-                drawComboCounter(
-                                gc,
-                                combat.getComboCount(p1),
-                                40,
-                                151,
-                                false);
+                if (combat != null) {
+                        drawComboCounter(
+                                        gc,
+                                        combat.getComboCount(p1),
+                                        40,
+                                        151,
+                                        false);
 
-                drawComboCounter(
-                                gc,
-                                combat.getComboCount(p2),
-                                width - 40,
-                                151,
-                                true);
+                        drawComboCounter(
+                                        gc,
+                                        combat.getComboCount(p2),
+                                        width - 40,
+                                        151,
+                                        true);
+                }
         }
 
         private void drawHealthBar(
@@ -801,6 +849,10 @@ public class CombatScreen implements Screen {
                                                 ? TextAlignment.RIGHT
                                                 : TextAlignment.LEFT);
 
+                String controls = rightAligned
+                                ? "ULTIMATE [;]  |  BLOCK [.]"
+                                : "ULTIMATE [H]  |  BLOCK [Q]";
+
                 if (ready) {
                         double pulse = 0.65 + 0.35
                                         * (0.5 + 0.5 * Math.sin(hudPulseTime * 5));
@@ -808,18 +860,14 @@ public class CombatScreen implements Screen {
                         gc.setFill(Color.rgb(255, 215, 80, pulse));
 
                         gc.fillText(
-                                        rightAligned
-                                                        ? "ULTIMATE READY  [;]"
-                                                        : "ULTIMATE READY  [H]",
+                                        controls + "  |  READY",
                                         x,
                                         y);
                 } else {
                         gc.setFill(Color.rgb(175, 185, 210));
 
                         gc.fillText(
-                                        rightAligned
-                                                        ? "ULTIMATE  [;]"
-                                                        : "ULTIMATE  [H]",
+                                        controls,
                                         x,
                                         y);
                 }
@@ -1083,13 +1131,71 @@ public class CombatScreen implements Screen {
                                 Constants.HEIGHT / 2.0 + 25);
         }
 
-        private double clamp(
-                        double value,
-                        double min,
-                        double max) {
+    private double clamp(
+            double value,
+            double min,
+            double max) {
 
-                return Math.max(
-                                min,
-                                Math.min(max, value));
-        }
+        return Math.max(
+                min,
+                Math.min(max, value));
+    }
+
+    // Animated ROUND / GET READY / FIGHT! overlay.
+    private void drawRoundIntro(GraphicsContext gc) {
+            double width = Constants.WIDTH;
+            double height = Constants.HEIGHT;
+            double centerX = width / 2.0;
+            double centerY = height / 2.0;
+
+            double elapsed = ROUND_INTRO_DURATION - roundIntroTimer;
+            boolean showFight = roundIntroTimer <= FIGHT_ANNOUNCEMENT_TIME;
+
+            gc.save();
+
+            try {
+                    gc.setFill(Color.rgb(3, 4, 15, 0.72));
+                    gc.fillRect(0, 0, width, height);
+
+                    double lineProgress = Math.min(1.0, elapsed / 0.35);
+                    double lineWidth = width * 0.42 * lineProgress;
+
+                    gc.setStroke(Color.rgb(255, 205, 65, 0.85));
+                    gc.setLineWidth(2);
+
+                    gc.strokeLine(
+                                    centerX - lineWidth, centerY - 52,
+                                    centerX + lineWidth, centerY - 52);
+
+                    gc.strokeLine(
+                                    centerX - lineWidth, centerY + 35,
+                                    centerX + lineWidth, centerY + 35);
+
+                    double scale = showFight
+                                    ? 1.0 + 0.08 * Math.sin(elapsed * 18)
+                                    : 0.85 + 0.15 * Math.min(1.0, elapsed / 0.35);
+
+                    gc.translate(centerX, centerY);
+                    gc.scale(scale, scale);
+                    gc.setTextAlign(TextAlignment.CENTER);
+
+                    if (!showFight) {
+                            int roundNumber = p1RoundsWon + p2RoundsWon + 1;
+
+                            gc.setFont(Font.font("Arial", 20));
+                            gc.setFill(Color.rgb(210, 215, 235));
+                            gc.fillText("ROUND " + roundNumber, 0, -12);
+
+                            gc.setFont(Font.font("Arial", 48));
+                            gc.setFill(Color.rgb(255, 215, 95));
+                            gc.fillText("GET READY", 0, 22);
+                    } else {
+                            gc.setFont(Font.font("Arial", 58));
+                            gc.setFill(Color.rgb(255, 225, 120));
+                            gc.fillText("FIGHT!", 0, 12);
+                    }
+            } finally {
+                    gc.restore();
+            }
+    }
 }

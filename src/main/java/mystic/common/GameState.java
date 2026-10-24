@@ -4,6 +4,7 @@ package mystic.common;
 public enum GameState {
     MENU,
     CHARACTER_SELECT,
+    VERSUS,
     COMBAT,
     RESULT,
     SETTINGS

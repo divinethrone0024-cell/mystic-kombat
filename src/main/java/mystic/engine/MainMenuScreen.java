@@ -7,6 +7,8 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
+import javafx.scene.image.Image;
+import javafx.scene.canvas.GraphicsContext;
 
 import mystic.common.Constants;
 import mystic.common.GameState;
@@ -15,6 +17,8 @@ public class MainMenuScreen implements Screen {
 
     private final GameEngine engine;
     private int selectedOption = 0;
+
+    private Image backgroundImage;
 
     private static final String[] OPTIONS = {
             "START GAME",
