@@ -11,6 +11,7 @@ import javafx.stage.Stage;
 import mystic.common.Constants;
 import mystic.common.GameState;
 import mystic.engine.CharacterSelectScreen;
+import mystic.engine.VersusScreen;
 import mystic.engine.CombatScreen;
 import mystic.engine.GameEngine;
 import mystic.engine.InputManager;
@@ -39,7 +40,11 @@ public class Main extends Application {
         engine.register(
                 GameState.CHARACTER_SELECT,
                 new CharacterSelectScreen(engine));
-
+        
+        engine.register(
+                GameState.VERSUS,
+                new VersusScreen(engine));   
+                     
         engine.register(
                 GameState.COMBAT,
                 new CombatScreen(engine));
@@ -50,7 +55,7 @@ public class Main extends Application {
         engine.register(
                 GameState.SETTINGS,
                 new SettingsScreen(engine));        
-                
+
         Scene scene = new Scene(new Group(canvas));
 
         input.attach(scene);

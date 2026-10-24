@@ -1,3 +1,4 @@
+
 package mystic.common;
 
 /** Things a player can ask a fighter to do. Keys are mapped to these. */
@@ -8,5 +9,8 @@ public enum Action {
     CROUCH,
     LIGHT,
     HEAVY,
-    ULTIMATE
+    ULTIMATE,
+    BLOCK,
+    DASH,
+    DODGE
 }

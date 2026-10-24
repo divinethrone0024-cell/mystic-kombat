@@ -1,3 +1,4 @@
+
 package mystic.fighters;
 
 import javafx.scene.canvas.GraphicsContext;
@@ -6,6 +7,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 
 import mystic.combat.AttackType;
+import mystic.combat.UltimateType;
 import mystic.common.Action;
 import mystic.common.Constants;
 import mystic.common.FighterState;
@@ -30,6 +32,22 @@ public abstract class Fighter {
 
     private static final double INPUT_BUFFER_SECONDS = 0.20;
     private static final double HIT_FLASH_DURATION = 0.10;
+
+    // Perfect Guard / Parry settings.
+    private static final double PARRY_WINDOW_SECONDS = 0.16;
+    private static final double PARRY_FLASH_DURATION = 0.30;
+    private static final double PARRY_STAGGER_SECONDS = 0.45;
+    private static final double PARRY_KI_REWARD = 12.0;
+
+    // Dash settings.
+    private static final double DASH_DURATION = 0.16;
+    private static final double DASH_SPEED = 1050.0;
+    private static final double DASH_COOLDOWN = 0.55;
+
+    // Dodge settings.
+    private static final double DODGE_DURATION = 0.24;
+    private static final double DODGE_COOLDOWN = 0.85;
+    private static final double DODGE_SPEED = 780.0;
 
     protected final String name;
     protected final int maxHealth;
@@ -64,8 +82,25 @@ public abstract class Fighter {
     private boolean ultimateActive = false;
     private double ultimateEffectTimer = 0.0;
 
-    // Brief visual feedback when damage is received.
+    // Hit feedback.
     private double hitFlashTimer = 0.0;
+
+    // Blocking state.
+    private boolean blocking = false;
+
+    // Perfect Guard / Parry state.
+    private double parryWindowTimer = 0.0;
+    private double parryFlashTimer = 0.0;
+
+    // Dash state.
+    private double dashTimer = 0.0;
+    private double dashCooldownTimer = 0.0;
+    private double dashDirection = 0.0;
+
+    // Dodge state.
+    private double dodgeTimer = 0.0;
+    private double dodgeCooldownTimer = 0.0;
+    private double dodgeDirection = 0.0;
 
     protected Fighter(
             String name,
@@ -85,6 +120,10 @@ public abstract class Fighter {
         this.color = color;
 
         resetForRound();
+    }
+
+    public UltimateType getUltimateType() {
+        return UltimateType.ARCANE_CATACLYSM;
     }
 
     /** Reset the fighter and Ki meter for a new round. */
@@ -112,17 +151,26 @@ public abstract class Fighter {
         ultimateEffectTimer = 0;
 
         hitFlashTimer = 0;
+        blocking = false;
+
+        parryWindowTimer = 0;
+        parryFlashTimer = 0;
+
+        dashTimer = 0;
+        dashCooldownTimer = 0;
+        dashDirection = 0;
+
+        dodgeTimer = 0;
+        dodgeCooldownTimer = 0;
+        dodgeDirection = 0;
 
         state = FighterState.IDLE;
         facingRight = startX < Constants.WIDTH / 2.0;
     }
 
-    /**
-     * Optional character-specific ultimate hook.
-     * Override this method in a fighter class for custom behaviour.
-     */
+    /** Optional character-specific ultimate hook. */
     public void useUltimate() {
-        // Add character-specific ultimate behaviour in subclasses.
+        // Character-specific behaviour can be implemented in subclasses.
     }
 
     public void update(
@@ -130,20 +178,33 @@ public abstract class Fighter {
             InputManager input,
             Fighter opponent) {
 
-        if (!Double.isFinite(dt) || dt <= 0) {
+        if (!Double.isFinite(dt) || dt <= 0 || input == null) {
             return;
         }
 
         updateUltimateEffect(dt);
         updateHitFlash(dt);
+        updateMovementAbilityTimers(dt);
+
+        parryFlashTimer = Math.max(0, parryFlashTimer - dt);
+        parryWindowTimer = Math.max(0, parryWindowTimer - dt);
 
         if (state == FighterState.KO) {
+            blocking = false;
+            parryWindowTimer = 0;
+            dashTimer = 0;
+            dodgeTimer = 0;
             physics(dt, 0);
             return;
         }
 
-        // Hitstun prevents movement and attacks.
+        // Hit-stun prevents movement abilities, blocking and attacks.
         if (hitstunTimer > 0) {
+            blocking = false;
+            parryWindowTimer = 0;
+            dashTimer = 0;
+            dodgeTimer = 0;
+
             hitstunTimer -= dt;
 
             state = FighterState.HITSTUN;
@@ -157,7 +218,94 @@ public abstract class Fighter {
             return;
         }
 
-        boolean crouching = onGround && input.isDown(player, Action.CROUCH);
+        // Update facing before choosing a default dodge direction.
+        if (opponent != null) {
+            facingRight = opponent.x > x;
+        }
+
+        /*
+         * Continue an active dash or dodge before processing other
+         * actions. Dash is not invulnerable; dodge is.
+         */
+        if (dashTimer > 0) {
+            blocking = false;
+            parryWindowTimer = 0;
+            state = FighterState.DASHING;
+            physics(dt, dashDirection * DASH_SPEED);
+            return;
+        }
+
+        if (dodgeTimer > 0) {
+            blocking = false;
+            parryWindowTimer = 0;
+            state = FighterState.DODGING;
+            physics(dt, dodgeDirection * DODGE_SPEED);
+            return;
+        }
+
+        boolean crouching = onGround
+                && input.isDown(player, Action.CROUCH);
+
+        // Blocking is grounded and cancels movement and attacks.
+        blocking = onGround
+                && input.isDown(player, Action.BLOCK)
+                && currentAttack == null
+                && hitstunTimer <= 0;
+
+        // A fresh block press opens a short parry window.
+        // Holding block afterwards is still an ordinary guard.
+        if (blocking
+                && input.wasPressed(player, Action.BLOCK)) {
+            parryWindowTimer = PARRY_WINDOW_SECONDS;
+        }
+
+        // Leaving the guard ends an unused parry opportunity.
+        if (!blocking) {
+            parryWindowTimer = 0;
+        }
+
+        if (blocking) {
+            bufferedAttack = null;
+            bufferedAttackTimer = 0;
+
+            if (opponent != null) {
+                facingRight = opponent.x > x;
+            }
+
+            state = FighterState.BLOCKING;
+            physics(dt, 0);
+            return;
+        }
+
+        /*
+         * Dash and dodge require fresh key presses.
+         * They cannot interrupt an existing attack.
+         */
+        if (currentAttack == null && !crouching) {
+            double requestedDirection = 0;
+
+            if (input.isDown(player, Action.LEFT)) {
+                requestedDirection -= 1;
+            }
+
+            if (input.isDown(player, Action.RIGHT)) {
+                requestedDirection += 1;
+            }
+
+            if (input.wasPressed(player, Action.DODGE)) {
+                if (startDodge(requestedDirection)) {
+                    physics(dt, dodgeDirection * DODGE_SPEED);
+                    return;
+                }
+            }
+
+            if (input.wasPressed(player, Action.DASH)) {
+                if (startDash(requestedDirection)) {
+                    physics(dt, dashDirection * DASH_SPEED);
+                    return;
+                }
+            }
+        }
 
         // Continue the current attack and accept buffered inputs.
         if (currentAttack != null) {
@@ -191,7 +339,6 @@ public abstract class Fighter {
             if (attackTimer >= currentAttack.total()) {
                 currentAttack = null;
 
-                // Start the buffered attack if it has not expired.
                 if (bufferedAttack != null
                         && bufferedAttackTimer > 0) {
 
@@ -208,10 +355,6 @@ public abstract class Fighter {
             }
 
             return;
-        }
-
-        if (opponent != null) {
-            facingRight = opponent.x > x;
         }
 
         // Attacks are allowed on the ground and in the air,
@@ -254,7 +397,7 @@ public abstract class Fighter {
 
         physics(dt, dir * speed * SPEED_SCALE);
 
-        // Update the fighter's animation state.
+        // Update animation state.
         if (!onGround) {
             state = FighterState.JUMP;
 
@@ -269,7 +412,103 @@ public abstract class Fighter {
         }
     }
 
+    /** Update dash/dodge durations and cooldowns. */
+    private void updateMovementAbilityTimers(double dt) {
+        dashCooldownTimer = Math.max(0, dashCooldownTimer - dt);
+        dodgeCooldownTimer = Math.max(0, dodgeCooldownTimer - dt);
+
+        dashTimer = Math.max(0, dashTimer - dt);
+        dodgeTimer = Math.max(0, dodgeTimer - dt);
+    }
+
+    /** Start a short dash in the requested horizontal direction. */
+    private boolean startDash(double direction) {
+        if (dashCooldownTimer > 0
+                || dashTimer > 0
+                || dodgeTimer > 0
+                || !onGround
+                || currentAttack != null
+                || blocking
+                || state == FighterState.KO
+                || hitstunTimer > 0) {
+            return false;
+        }
+
+        dashDirection = direction == 0
+                ? (facingRight ? 1.0 : -1.0)
+                : Math.signum(direction);
+
+        dashTimer = DASH_DURATION;
+        dashCooldownTimer = DASH_COOLDOWN;
+
+        bufferedAttack = null;
+        bufferedAttackTimer = 0;
+
+        state = FighterState.DASHING;
+        return true;
+    }
+
+    /** Start a brief evasive dodge. */
+    private boolean startDodge(double direction) {
+        if (dodgeCooldownTimer > 0
+                || dodgeTimer > 0
+                || dashTimer > 0
+                || !onGround
+                || currentAttack != null
+                || blocking
+                || state == FighterState.KO
+                || hitstunTimer > 0) {
+            return false;
+        }
+
+        /*
+         * A directional input chooses the dodge direction.
+         * With no directional input, dodge away from the opponent.
+         */
+        dodgeDirection = direction == 0
+                ? (facingRight ? -1.0 : 1.0)
+                : Math.signum(direction);
+
+        dodgeTimer = DODGE_DURATION;
+        dodgeCooldownTimer = DODGE_COOLDOWN;
+
+        bufferedAttack = null;
+        bufferedAttackTimer = 0;
+
+        state = FighterState.DODGING;
+        return true;
+    }
+
+    /** True while a dash is active. A dash does not grant invulnerability. */
+    public boolean isDashing() {
+        return dashTimer > 0;
+    }
+
+    /** True while dodge invulnerability is active. */
+    public boolean isDodging() {
+        return dodgeTimer > 0;
+    }
+
+    /**
+     * CombatSystem uses this to determine whether an incoming attack
+     * should be evaded.
+     */
+    public boolean canEvadeAttack() {
+        return isDodging() && state != FighterState.KO;
+    }
+
+    public double getDashCooldownRemaining() {
+        return dashCooldownTimer;
+    }
+
+    public double getDodgeCooldownRemaining() {
+        return dodgeCooldownTimer;
+    }
+
     private void startAttack(AttackType attack) {
+        blocking = false;
+        parryWindowTimer = 0;
+
         currentAttack = attack;
         attackTimer = 0;
         hasHit = false;
@@ -287,7 +526,6 @@ public abstract class Fighter {
 
         if (Math.abs(knockbackVx) <= slow) {
             knockbackVx = 0;
-
         } else {
             knockbackVx -= Math.signum(knockbackVx) * slow;
         }
@@ -309,7 +547,58 @@ public abstract class Fighter {
                 Math.min(Constants.WIDTH - WIDTH / 2, x));
     }
 
-    /** Called when the fighter receives a successful hit. */
+    /**
+     * Returns true while the short perfect-guard window is active.
+     * CombatSystem should consume this when an attack connects.
+     */
+    public boolean isPerfectGuardActive() {
+        return blocking && parryWindowTimer > 0;
+    }
+
+    /**
+     * Consume a successful parry opportunity.
+     * Returns false if the timing window has expired or was already used.
+     */
+    public boolean consumePerfectGuard() {
+        if (!isPerfectGuardActive()) {
+            return false;
+        }
+
+        parryWindowTimer = 0;
+        parryFlashTimer = PARRY_FLASH_DURATION;
+        gainKi(PARRY_KI_REWARD);
+
+        return true;
+    }
+
+    /**
+     * Briefly stagger the attacker after a successful parry.
+     * This does not deal damage.
+     */
+    public void staggerFromParry() {
+        if (state == FighterState.KO) {
+            return;
+        }
+
+        blocking = false;
+        parryWindowTimer = 0;
+
+        currentAttack = null;
+        attackTimer = 0;
+        hasHit = false;
+
+        bufferedAttack = null;
+        bufferedAttackTimer = 0;
+
+        dashTimer = 0;
+        dodgeTimer = 0;
+
+        knockbackVx = 0;
+        hitstunTimer = PARRY_STAGGER_SECONDS;
+        state = FighterState.HITSTUN;
+    }
+
+    /** Called when the fighter receives a successful normal hit. */
     public void takeHit(
             int amount,
             double stunSeconds,
@@ -328,10 +617,15 @@ public abstract class Fighter {
         // Taking damage also generates Mystic Energy.
         gainKi(actualDamage * 0.7);
 
-        // Trigger a brief white flash.
         hitFlashTimer = HIT_FLASH_DURATION;
 
-        // Being hit cancels the current attack and buffered input.
+        // A normal hit interrupts blocking, attacks, dash and dodge.
+        blocking = false;
+        parryWindowTimer = 0;
+
+        dashTimer = 0;
+        dodgeTimer = 0;
+
         currentAttack = null;
         attackTimer = 0;
         hasHit = false;
@@ -343,7 +637,8 @@ public abstract class Fighter {
                 ? knockback
                 : 0;
 
-        if (health == 0) {
+        if (health <= 0) {
+            health = 0;
             state = FighterState.KO;
             hitstunTimer = 0;
 
@@ -353,6 +648,48 @@ public abstract class Fighter {
             hitstunTimer = Double.isFinite(stunSeconds)
                     ? Math.max(0, stunSeconds)
                     : 0;
+        }
+    }
+
+    /**
+     * Called when an attack is successfully blocked.
+     * Applies reduced damage without normal hitstun or knockback.
+     */
+    public void takeBlockedHit(int amount) {
+        if (state == FighterState.KO) {
+            return;
+        }
+
+        int actualDamage = Math.min(
+                health,
+                Math.max(0, amount));
+
+        health -= actualDamage;
+
+        // Blocking damage still generates a small amount of Ki.
+        gainKi(actualDamage * 0.7);
+
+        hitstunTimer = 0;
+        knockbackVx = 0;
+
+        dashTimer = 0;
+        dodgeTimer = 0;
+
+        currentAttack = null;
+        attackTimer = 0;
+        hasHit = false;
+
+        bufferedAttack = null;
+        bufferedAttackTimer = 0;
+
+        if (health <= 0) {
+            health = 0;
+            blocking = false;
+            parryWindowTimer = 0;
+            state = FighterState.KO;
+        } else {
+            blocking = true;
+            state = FighterState.BLOCKING;
         }
     }
 
@@ -383,10 +720,7 @@ public abstract class Fighter {
         return ki >= MAX_KI;
     }
 
-    /**
-     * Consume the full Ki bar and start the visual effect.
-     * Returns false if the ultimate cannot be activated.
-     */
+    /** Consume the full Ki bar and start the visual effect. */
     public boolean consumeKiForUltimate() {
         if (!isUltimateReady()
                 || ultimateActive
@@ -462,7 +796,8 @@ public abstract class Fighter {
         }
 
         boolean active = attackTimer >= currentAttack.startup
-                && attackTimer < currentAttack.startup + currentAttack.active;
+                && attackTimer < currentAttack.startup
+                        + currentAttack.active;
 
         if (!active) {
             return null;
@@ -504,16 +839,56 @@ public abstract class Fighter {
     public void render(GraphicsContext gc, boolean debug) {
         Rect hb = getHurtbox();
 
+        // Dash and dodge afterimages.
+        if (isDashing() || isDodging()) {
+            gc.save();
+
+            try {
+                gc.setGlobalAlpha(0.30);
+                gc.setFill(
+                        isDodging()
+                                ? Color.DEEPSKYBLUE
+                                : Color.AQUA);
+
+                double direction = isDodging()
+                        ? dodgeDirection
+                        : dashDirection;
+
+                for (int i = 1; i <= 3; i++) {
+                    double trailX = x - direction * i * 13;
+
+                    gc.fillRect(
+                            trailX - WIDTH / 2,
+                            hb.y(),
+                            WIDTH,
+                            hb.h());
+                }
+            } finally {
+                gc.restore();
+            }
+        }
+
         Color body = color;
 
         if (state == FighterState.KO) {
             body = color.darker().darker();
 
-        } else if (hitFlashTimer > 0) {
-            // A short white flash makes successful hits easier to see.
+        } else if (parryFlashTimer > 0) {
+            body = Color.WHITE;
+
+        } else if (hitFlashTimer > 0 && !blocking) {
             body = Color.WHITE;
 
         } else if (state == FighterState.HITSTUN) {
+            body = color.brighter();
+
+        } else if (blocking) {
+            body = color.deriveColor(0, 0.75, 0.85, 1);
+
+        } else if (isDodging()) {
+            body = color.deriveColor(0, 0.65, 1.25, 0.85);
+
+        } else if (isDashing()) {
             body = color.brighter();
         }
 
@@ -533,6 +908,7 @@ public abstract class Fighter {
         gc.setFill(body);
         gc.fillRect(hb.x(), hb.y(), hb.w(), hb.h());
 
+        // Eyes.
         gc.setFill(Color.WHITE);
 
         double eyeX = facingRight
@@ -544,6 +920,97 @@ public abstract class Fighter {
                 hb.y() + 14,
                 12,
                 10);
+
+        // Dash / dodge status labels.
+        if (isDashing() || isDodging()) {
+            gc.setFill(isDodging() ? Color.DEEPSKYBLUE : Color.AQUA);
+            gc.setFont(Font.font("Arial", 12));
+            gc.setTextAlign(TextAlignment.CENTER);
+
+            gc.fillText(
+                    isDodging() ? "DODGE" : "DASH",
+                    x,
+                    y - STAND_HEIGHT - 8);
+        }
+
+        // Blue guard shield.
+        if (blocking) {
+            gc.setStroke(
+                    isPerfectGuardActive()
+                            ? Color.WHITE
+                            : Color.DEEPSKYBLUE);
+
+            gc.setLineWidth(
+                    isPerfectGuardActive() ? 7 : 4);
+
+            double shieldX = facingRight
+                    ? x + WIDTH / 2 - 2
+                    : x - WIDTH / 2 - 20;
+
+            gc.strokeArc(
+                    shieldX,
+                    y - STAND_HEIGHT + 8,
+                    40,
+                    72,
+                    facingRight ? -90 : 90,
+                    180,
+                    javafx.scene.shape.ArcType.OPEN);
+
+            gc.setLineWidth(1);
+
+            gc.setFill(
+                    isPerfectGuardActive()
+                            ? Color.WHITE
+                            : Color.DEEPSKYBLUE);
+
+            gc.setFont(Font.font("Arial", 12));
+            gc.setTextAlign(TextAlignment.CENTER);
+
+            gc.fillText(
+                    isPerfectGuardActive() ? "PARRY" : "GUARD",
+                    x,
+                    y - STAND_HEIGHT - 8);
+        }
+
+        // Successful parry flash.
+        if (parryFlashTimer > 0) {
+            double progress = parryFlashTimer / PARRY_FLASH_DURATION;
+
+            double radius = 42 + (1 - progress) * 42;
+
+            gc.setStroke(Color.WHITE.deriveColor(
+                    0, 1, 1, Math.max(0, progress)));
+
+            gc.setLineWidth(4);
+
+            gc.strokeOval(
+                    x - radius,
+                    y - STAND_HEIGHT / 2 - radius,
+                    radius * 2,
+                    radius * 2);
+
+            gc.setStroke(Color.DEEPSKYBLUE.deriveColor(
+                    0, 1, 1, Math.max(0, progress)));
+
+            gc.setLineWidth(2);
+
+            gc.strokeOval(
+                    x - radius * 0.72,
+                    y - STAND_HEIGHT / 2 - radius * 0.72,
+                    radius * 1.44,
+                    radius * 1.44);
+
+            gc.setLineWidth(1);
+
+            gc.setFill(Color.WHITE);
+            gc.setFont(Font.font("Arial", 18));
+            gc.setTextAlign(TextAlignment.CENTER);
+
+            gc.fillText(
+                    "PERFECT GUARD!",
+                    x,
+                    y - STAND_HEIGHT - 24);
+        }
 
         Rect hit = getHitbox();
 
@@ -601,6 +1068,10 @@ public abstract class Fighter {
 
     public boolean isFacingRight() {
         return facingRight;
+    }
+
+    public boolean isBlocking() {
+        return blocking;
     }
 
     public boolean isKO() {
