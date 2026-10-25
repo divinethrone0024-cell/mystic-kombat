@@ -1,4 +1,3 @@
-
 package mystic;
 
 import javafx.application.Application;
@@ -18,65 +17,72 @@ import mystic.engine.InputManager;
 import mystic.engine.MainMenuScreen;
 import mystic.engine.ResultScreen;
 import mystic.engine.SettingsScreen;
+import mystic.engine.SoundManager;
 
 public class Main extends Application {
 
-    @Override
-    public void start(Stage stage) {
-        Canvas canvas = new Canvas(
-                Constants.WIDTH,
-                Constants.HEIGHT);
+        @Override
+        public void start(Stage stage) {
+                Canvas canvas = new Canvas(
+                                Constants.WIDTH,
+                                Constants.HEIGHT);
 
-        GraphicsContext gc = canvas.getGraphicsContext2D();
+                GraphicsContext gc = canvas.getGraphicsContext2D();
 
-        InputManager input = new InputManager();
-        GameEngine engine = new GameEngine(gc, input);
+                InputManager input = new InputManager();
+                GameEngine engine = new GameEngine(gc, input);
 
-        // Register game screens.
-        engine.register(
-                GameState.MENU,
-                new MainMenuScreen(engine));
+                // Register game screens.
+                engine.register(
+                                GameState.MENU,
+                                new MainMenuScreen(engine));
 
-        engine.register(
-                GameState.CHARACTER_SELECT,
-                new CharacterSelectScreen(engine));
-        
-        engine.register(
-                GameState.VERSUS,
-                new VersusScreen(engine));   
-                     
-        engine.register(
-                GameState.COMBAT,
-                new CombatScreen(engine));
+                engine.register(
+                                GameState.CHARACTER_SELECT,
+                                new CharacterSelectScreen(engine));
 
-        engine.register(
-                GameState.RESULT,
-                new ResultScreen(engine));
-        engine.register(
-                GameState.SETTINGS,
-                new SettingsScreen(engine));        
+                engine.register(
+                                GameState.VERSUS,
+                                new VersusScreen(engine));
 
-        Scene scene = new Scene(new Group(canvas));
+                engine.register(
+                                GameState.COMBAT,
+                                new CombatScreen(engine));
 
-        input.attach(scene);
+                engine.register(
+                                GameState.RESULT,
+                                new ResultScreen(engine));
+                engine.register(
+                                GameState.SETTINGS,
+                                new SettingsScreen(engine));
 
-        // Clear pressed keys when the window loses focus.
-        stage.focusedProperty().addListener(
-                (obs, wasFocused, isFocused) -> {
-                    if (!isFocused) {
-                        input.clear();
-                    }
+                Scene scene = new Scene(new Group(canvas));
+
+                input.attach(scene);
+
+                // Clear pressed keys when the window loses focus.
+                stage.focusedProperty().addListener(
+                                (obs, wasFocused, isFocused) -> {
+                                        if (!isFocused) {
+                                                input.clear();
+                                        }
+                                });
+
+                stage.setTitle("Mystic Kombat");
+                stage.setResizable(false);
+                stage.setScene(scene);
+                stage.show();
+
+                SoundManager.startMusic();
+                stage.setOnCloseRequest(event -> {
+                        engine.stop();
+                        SoundManager.stopMusic();
                 });
 
-        stage.setTitle("Mystic Kombat");
-        stage.setResizable(false);
-        stage.setScene(scene);
-        stage.show();
+                engine.start();
+        }
 
-        engine.start();
-    }
-
-    public static void main(String[] args) {
-        launch(args);
-    }
+        public static void main(String[] args) {
+                launch(args);
+        }
 }

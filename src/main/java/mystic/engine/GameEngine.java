@@ -15,8 +15,8 @@ import mystic.fighters.MysticMage;
 import mystic.fighters.ShadowVigilante;
 
 /**
- * The heart of the game: manages the game loop,
- * screen switching, selected fighters, and match results.
+ * Manages the game loop, screen switching, character selection,
+ * time scaling, and match results.
  */
 public class GameEngine {
 
@@ -27,19 +27,17 @@ public class GameEngine {
 
     private GameState state = GameState.MENU;
 
-    // Results from the most recently completed match.
     private String matchWinner = "";
     private int player1MatchWins;
     private int player2MatchWins;
 
-    /** 1.0 = normal speed; below 1.0 = slow motion. */
+    /** 1.0 = normal speed; 0.0 = frozen. */
     private double timeScale = 1.0;
 
     private long lastNanos = 0;
+    private AnimationTimer gameTimer;
 
-    // Character selection:
-    // 0 = Mystic Mage
-    // 1 = Shadow Vigilante
+    // 0 = Mystic Mage, 1 = Shadow Vigilante
     private int player1Choice = 0;
     private int player2Choice = 1;
 
@@ -48,7 +46,6 @@ public class GameEngine {
         this.input = input;
     }
 
-    /** Register a screen for a particular game state. */
     public void register(GameState state, Screen screen) {
         screens.put(state, screen);
     }
@@ -57,9 +54,19 @@ public class GameEngine {
         return state;
     }
 
-    /** Switch to another screen and initialize it. */
+    /**
+     * Switch screens and restore normal gameplay speed.
+     */
     public void changeState(GameState next) {
+        if (next == null) {
+            return;
+        }
+
         state = next;
+
+        // Prevent slow motion from leaking into another screen.
+        timeScale = 1.0;
+        lastNanos = 0;
 
         Screen screen = screens.get(state);
 
@@ -73,18 +80,16 @@ public class GameEngine {
     }
 
     public void setTimeScale(double timeScale) {
-        this.timeScale = Math.max(0.0, timeScale);
+        if (!Double.isFinite(timeScale)) {
+            this.timeScale = 1.0;
+            return;
+        }
+
+        this.timeScale = Math.max(0.0, Math.min(timeScale, 1.0));
     }
 
     // ---------------- MATCH RESULTS ----------------
 
-    /**
-     * Store the result of a completed match.
-     *
-     * @param winner      display text for the winning fighter
-     * @param player1Wins rounds won by Player 1
-     * @param player2Wins rounds won by Player 2
-     */
     public void setMatchResult(
             String winner,
             int player1Wins,
@@ -125,16 +130,17 @@ public class GameEngine {
         player2Choice = Math.floorMod(choice, 2);
     }
 
-    /**
-     * Creates a fresh fighter using the selected character.
-     *
-     * @param player 1 or 2
-     * @param startX starting horizontal position
-     */
     public Fighter createFighter(int player, double startX) {
-        int choice = (player == 1)
-                ? player1Choice
-                : player2Choice;
+        int choice;
+
+        if (player == 1) {
+            choice = player1Choice;
+        } else if (player == 2) {
+            choice = player2Choice;
+        } else {
+            throw new IllegalArgumentException(
+                    "Player must be 1 or 2, got: " + player);
+        }
 
         if (choice == 0) {
             return new MysticMage(player, startX);
@@ -145,11 +151,14 @@ public class GameEngine {
 
     // ---------------- GAME LOOP ----------------
 
-    /** Start the JavaFX game loop. */
     public void start() {
+        if (gameTimer != null) {
+            return;
+        }
+
         changeState(GameState.MENU);
 
-        new AnimationTimer() {
+        gameTimer = new AnimationTimer() {
             @Override
             public void handle(long now) {
                 if (lastNanos == 0) {
@@ -157,25 +166,25 @@ public class GameEngine {
                     return;
                 }
 
-                double dt = (now - lastNanos)
-                        / 1_000_000_000.0;
-
+                double dt = (now - lastNanos) / 1_000_000_000.0;
                 lastNanos = now;
 
-                // Avoid a large update after a pause or lag spike.
-                dt = Math.min(dt, 0.05);
+                // Avoid large physics steps after lag or pauses.
+                dt = Math.max(0.0, Math.min(dt, 0.05));
 
                 tick(dt);
             }
-        }.start();
+        };
+
+        gameTimer.start();
     }
 
-    /** Update and render the currently active screen. */
     private void tick(double dt) {
         Screen screen = screens.get(state);
 
         if (screen != null) {
-            screen.update(dt * timeScale, input);
+            double scaledDt = dt * timeScale;
+            screen.update(scaledDt, input);
         }
 
         gc.setFill(Color.BLACK);
@@ -185,10 +194,25 @@ public class GameEngine {
                 Constants.WIDTH,
                 Constants.HEIGHT);
 
+        // Render using real frames even during slow motion.
         if (screen != null) {
             screen.render(gc);
         }
 
         input.endFrame();
+    }
+
+    /**
+     * Stop the game loop when shutting down the game.
+     */
+    public void stop() {
+        if (gameTimer != null) {
+            gameTimer.stop();
+            gameTimer = null;
+        }
+
+        input.clear();
+        lastNanos = 0;
+        timeScale = 1.0;
     }
 }

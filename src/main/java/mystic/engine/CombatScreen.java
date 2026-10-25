@@ -111,6 +111,7 @@ public class CombatScreen implements Screen {
                 roundMessage = "";
 
                 roundIntroTimer = ROUND_INTRO_DURATION;
+                SoundManager.play(SoundManager.Sound.ROUND);
 
                 p1DisplayedHealth = p1.getHealth();
                 p2DisplayedHealth = p2.getHealth();
@@ -184,9 +185,14 @@ public class CombatScreen implements Screen {
                         return;
                 }
 
+                // Play input feedback from the same action bindings used by Fighter.
+                playActionSounds(input, 1);
+                playActionSounds(input, 2);
+
                 // Player 1 Ultimate Incantation.
                 if (input.wasPressed(1, Action.ULTIMATE)) {
                         if (combat.activateUltimate(p1, p2)) {
+                                SoundManager.play(SoundManager.Sound.ULTIMATE);
                                 startUltimateCinematic(p1, 1);
                         }
                 }
@@ -194,6 +200,7 @@ public class CombatScreen implements Screen {
                 // Player 2 Ultimate Incantation.
                 if (input.wasPressed(2, Action.ULTIMATE)) {
                         if (combat.activateUltimate(p2, p1)) {
+                                SoundManager.play(SoundManager.Sound.ULTIMATE);
                                 startUltimateCinematic(p2, 2);
                         }
                 }
@@ -202,9 +209,14 @@ public class CombatScreen implements Screen {
                 p1.update(safeDt, input, p2);
                 p2.update(safeDt, input, p1);
 
-                // Resolve attacks from both players.
+                // Resolve attacks from both players and play feedback on confirmed damage.
+                int p1HealthBefore = p1.getHealth();
+                int p2HealthBefore = p2.getHealth();
                 combat.resolve(p1, p2);
                 combat.resolve(p2, p1);
+                if (p1.getHealth() < p1HealthBefore || p2.getHealth() < p2HealthBefore) {
+                        SoundManager.play(SoundManager.Sound.HIT);
+                }
 
                 keepApart();
 
@@ -223,6 +235,20 @@ public class CombatScreen implements Screen {
                         } else {
                                 finishRound(0);
                         }
+                }
+        }
+
+        private void playActionSounds(InputManager input, int player) {
+                if (input.wasPressed(player, Action.LIGHT)) {
+                        SoundManager.play(SoundManager.Sound.LIGHT);
+                } else if (input.wasPressed(player, Action.HEAVY)
+                                || input.wasPressed(player, Action.LAUNCHER)) {
+                        SoundManager.play(SoundManager.Sound.HEAVY);
+                }
+
+                if (input.wasPressed(player, Action.DASH)
+                                || input.wasPressed(player, Action.DODGE)) {
+                        SoundManager.play(SoundManager.Sound.DASH);
                 }
         }
 
@@ -1131,71 +1157,71 @@ public class CombatScreen implements Screen {
                                 Constants.HEIGHT / 2.0 + 25);
         }
 
-    private double clamp(
-            double value,
-            double min,
-            double max) {
+        private double clamp(
+                        double value,
+                        double min,
+                        double max) {
 
-        return Math.max(
-                min,
-                Math.min(max, value));
-    }
+                return Math.max(
+                                min,
+                                Math.min(max, value));
+        }
 
-    // Animated ROUND / GET READY / FIGHT! overlay.
-    private void drawRoundIntro(GraphicsContext gc) {
-            double width = Constants.WIDTH;
-            double height = Constants.HEIGHT;
-            double centerX = width / 2.0;
-            double centerY = height / 2.0;
+        // Animated ROUND / GET READY / FIGHT! overlay.
+        private void drawRoundIntro(GraphicsContext gc) {
+                double width = Constants.WIDTH;
+                double height = Constants.HEIGHT;
+                double centerX = width / 2.0;
+                double centerY = height / 2.0;
 
-            double elapsed = ROUND_INTRO_DURATION - roundIntroTimer;
-            boolean showFight = roundIntroTimer <= FIGHT_ANNOUNCEMENT_TIME;
+                double elapsed = ROUND_INTRO_DURATION - roundIntroTimer;
+                boolean showFight = roundIntroTimer <= FIGHT_ANNOUNCEMENT_TIME;
 
-            gc.save();
+                gc.save();
 
-            try {
-                    gc.setFill(Color.rgb(3, 4, 15, 0.72));
-                    gc.fillRect(0, 0, width, height);
+                try {
+                        gc.setFill(Color.rgb(3, 4, 15, 0.72));
+                        gc.fillRect(0, 0, width, height);
 
-                    double lineProgress = Math.min(1.0, elapsed / 0.35);
-                    double lineWidth = width * 0.42 * lineProgress;
+                        double lineProgress = Math.min(1.0, elapsed / 0.35);
+                        double lineWidth = width * 0.42 * lineProgress;
 
-                    gc.setStroke(Color.rgb(255, 205, 65, 0.85));
-                    gc.setLineWidth(2);
+                        gc.setStroke(Color.rgb(255, 205, 65, 0.85));
+                        gc.setLineWidth(2);
 
-                    gc.strokeLine(
-                                    centerX - lineWidth, centerY - 52,
-                                    centerX + lineWidth, centerY - 52);
+                        gc.strokeLine(
+                                        centerX - lineWidth, centerY - 52,
+                                        centerX + lineWidth, centerY - 52);
 
-                    gc.strokeLine(
-                                    centerX - lineWidth, centerY + 35,
-                                    centerX + lineWidth, centerY + 35);
+                        gc.strokeLine(
+                                        centerX - lineWidth, centerY + 35,
+                                        centerX + lineWidth, centerY + 35);
 
-                    double scale = showFight
-                                    ? 1.0 + 0.08 * Math.sin(elapsed * 18)
-                                    : 0.85 + 0.15 * Math.min(1.0, elapsed / 0.35);
+                        double scale = showFight
+                                        ? 1.0 + 0.08 * Math.sin(elapsed * 18)
+                                        : 0.85 + 0.15 * Math.min(1.0, elapsed / 0.35);
 
-                    gc.translate(centerX, centerY);
-                    gc.scale(scale, scale);
-                    gc.setTextAlign(TextAlignment.CENTER);
+                        gc.translate(centerX, centerY);
+                        gc.scale(scale, scale);
+                        gc.setTextAlign(TextAlignment.CENTER);
 
-                    if (!showFight) {
-                            int roundNumber = p1RoundsWon + p2RoundsWon + 1;
+                        if (!showFight) {
+                                int roundNumber = p1RoundsWon + p2RoundsWon + 1;
 
-                            gc.setFont(Font.font("Arial", 20));
-                            gc.setFill(Color.rgb(210, 215, 235));
-                            gc.fillText("ROUND " + roundNumber, 0, -12);
+                                gc.setFont(Font.font("Arial", 20));
+                                gc.setFill(Color.rgb(210, 215, 235));
+                                gc.fillText("ROUND " + roundNumber, 0, -12);
 
-                            gc.setFont(Font.font("Arial", 48));
-                            gc.setFill(Color.rgb(255, 215, 95));
-                            gc.fillText("GET READY", 0, 22);
-                    } else {
-                            gc.setFont(Font.font("Arial", 58));
-                            gc.setFill(Color.rgb(255, 225, 120));
-                            gc.fillText("FIGHT!", 0, 12);
-                    }
-            } finally {
-                    gc.restore();
-            }
-    }
+                                gc.setFont(Font.font("Arial", 48));
+                                gc.setFill(Color.rgb(255, 215, 95));
+                                gc.fillText("GET READY", 0, 22);
+                        } else {
+                                gc.setFont(Font.font("Arial", 58));
+                                gc.setFill(Color.rgb(255, 225, 120));
+                                gc.fillText("FIGHT!", 0, 12);
+                        }
+                } finally {
+                        gc.restore();
+                }
+        }
 }

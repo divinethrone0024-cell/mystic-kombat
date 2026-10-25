@@ -12,5 +12,6 @@ public enum Action {
     ULTIMATE,
     BLOCK,
     DASH,
-    DODGE
+    DODGE,
+    LAUNCHER
 }
