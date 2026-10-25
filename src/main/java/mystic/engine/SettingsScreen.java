@@ -40,6 +40,14 @@ public class SettingsScreen implements Screen {
     public void onEnter() {
         selectedOption = 0;
         showingControls = false;
+        syncAudioSettings();
+    }
+
+    private void syncAudioSettings() {
+        SoundManager.setMusicVolume(musicVolume);
+        SoundManager.setMusicEnabled(!musicMuted);
+        SoundManager.setVolume(sfxVolume);
+        SoundManager.setEnabled(!sfxMuted);
     }
 
     @Override
@@ -81,6 +89,8 @@ public class SettingsScreen implements Screen {
                 || input.wasPressed(KeyCode.SPACE)) {
             activateOption();
         }
+
+        syncAudioSettings();
     }
 
     private void adjustOption(double amount) {
@@ -193,7 +203,7 @@ public class SettingsScreen implements Screen {
         gc.fillText("PLAYER 1", width * 0.29, 185);
         gc.fillText("PLAYER 2", width * 0.71, 185);
 
-        gc.setFont(Font.font("Arial", 16));
+        gc.setFont(Font.font("Arial", 14));
         gc.setFill(Color.LIGHTGRAY);
 
         String[] actions = {
@@ -202,19 +212,24 @@ public class SettingsScreen implements Screen {
                 "Crouch",
                 "Light Attack",
                 "Heavy Attack",
-                "Ultimate Incantation"
+                "Ultimate Incantation",
+                "Block",
+                "Dash",
+                "Dodge",
+                "Launcher"
         };
 
         String[] player1Keys = {
-                "A / D", "W", "S", "F", "G", "H"
+                "A / D", "W", "S", "J", "K", "U", "F", "L", "I", "H"
         };
 
         String[] player2Keys = {
-                "LEFT / RIGHT", "UP", "DOWN", "K", "L", ";"
+                "LEFT / RIGHT", "UP", "DOWN", "NUMPAD 1", "NUMPAD 2",
+                "NUMPAD 0", ".", "NUMPAD 3", "NUMPAD 4", "NUMPAD 5"
         };
 
-        double startY = 230;
-        double rowGap = 42;
+        double startY = 215;
+        double rowGap = 34;
 
         for (int i = 0; i < actions.length; i++) {
             double y = startY + i * rowGap;

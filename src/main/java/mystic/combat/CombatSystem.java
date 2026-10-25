@@ -413,6 +413,20 @@ public class CombatSystem {
 
         if (guarded) {
             defender.takeBlockedHit(damage);
+
+        } else if (attack == AttackType.LAUNCHER) {
+            defender.takeLauncherHit(
+                    damage,
+                    attack.hitstun,
+                    direction * attack.knockback,
+                    900.0);
+
+        } else if (defender.isLaunched()) {
+            defender.takeAirComboHit(
+                    damage,
+                    attack.hitstun,
+                    direction * attack.knockback);
+
         } else {
             defender.takeHit(
                     damage,

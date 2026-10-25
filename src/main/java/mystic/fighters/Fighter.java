@@ -33,6 +33,9 @@ public abstract class Fighter {
     private static final double INPUT_BUFFER_SECONDS = 0.20;
     private static final double HIT_FLASH_DURATION = 0.10;
 
+    // Launcher settings.
+    private static final double LAUNCH_VELOCITY = 900.0;
+
     // Perfect Guard / Parry settings.
     private static final double PARRY_WINDOW_SECONDS = 0.16;
     private static final double PARRY_FLASH_DURATION = 0.30;
@@ -64,6 +67,8 @@ public abstract class Fighter {
     protected double vy;
     protected double knockbackVx;
     protected double hitstunTimer;
+
+    private boolean launched = false;
 
     protected boolean onGround = true;
     protected boolean facingRight;
@@ -136,6 +141,7 @@ public abstract class Fighter {
         vy = 0;
         knockbackVx = 0;
         hitstunTimer = 0;
+        launched = false;
 
         onGround = true;
 
@@ -212,7 +218,13 @@ public abstract class Fighter {
 
             if (hitstunTimer <= 0) {
                 hitstunTimer = 0;
-                state = FighterState.IDLE;
+
+                if (onGround) {
+                    launched = false;
+                    state = FighterState.IDLE;
+                } else {
+                    state = FighterState.JUMP;
+                }
             }
 
             return;
@@ -253,13 +265,11 @@ public abstract class Fighter {
                 && hitstunTimer <= 0;
 
         // A fresh block press opens a short parry window.
-        // Holding block afterwards is still an ordinary guard.
         if (blocking
                 && input.wasPressed(player, Action.BLOCK)) {
             parryWindowTimer = PARRY_WINDOW_SECONDS;
         }
 
-        // Leaving the guard ends an unused parry opportunity.
         if (!blocking) {
             parryWindowTimer = 0;
         }
@@ -311,7 +321,11 @@ public abstract class Fighter {
         if (currentAttack != null) {
 
             if (!crouching) {
-                if (input.wasPressed(player, Action.HEAVY)) {
+                if (input.wasPressed(player, Action.LAUNCHER)) {
+                    bufferedAttack = AttackType.LAUNCHER;
+                    bufferedAttackTimer = INPUT_BUFFER_SECONDS;
+
+                } else if (input.wasPressed(player, Action.HEAVY)) {
                     bufferedAttack = AttackType.HEAVY;
                     bufferedAttackTimer = INPUT_BUFFER_SECONDS;
 
@@ -350,7 +364,9 @@ public abstract class Fighter {
                     startAttack(nextAttack);
 
                 } else {
-                    state = FighterState.IDLE;
+                    state = onGround
+                            ? FighterState.IDLE
+                            : FighterState.JUMP;
                 }
             }
 
@@ -360,6 +376,12 @@ public abstract class Fighter {
         // Attacks are allowed on the ground and in the air,
         // but not while crouching.
         if (!crouching) {
+            if (input.wasPressed(player, Action.LAUNCHER)) {
+                startAttack(AttackType.LAUNCHER);
+                physics(dt, 0);
+                return;
+            }
+
             if (input.wasPressed(player, Action.HEAVY)) {
                 startAttack(AttackType.HEAVY);
                 physics(dt, 0);
@@ -489,10 +511,7 @@ public abstract class Fighter {
         return dodgeTimer > 0;
     }
 
-    /**
-     * CombatSystem uses this to determine whether an incoming attack
-     * should be evaded.
-     */
+    /** CombatSystem uses this to determine whether an incoming attack is evaded. */
     public boolean canEvadeAttack() {
         return isDodging() && state != FighterState.KO;
     }
@@ -513,9 +532,12 @@ public abstract class Fighter {
         attackTimer = 0;
         hasHit = false;
 
-        state = attack == AttackType.HEAVY
-                ? FighterState.ATTACK_HEAVY
-                : FighterState.ATTACK_LIGHT;
+        if (attack == AttackType.HEAVY
+                || attack == AttackType.LAUNCHER) {
+            state = FighterState.ATTACK_HEAVY;
+        } else {
+            state = FighterState.ATTACK_LIGHT;
+        }
     }
 
     private void physics(double dt, double moveX) {
@@ -539,6 +561,9 @@ public abstract class Fighter {
             y = Constants.GROUND_Y;
             vy = 0;
             onGround = true;
+            launched = false;
+        } else {
+            onGround = false;
         }
 
         // Keep the fighter inside the arena.
@@ -547,18 +572,12 @@ public abstract class Fighter {
                 Math.min(Constants.WIDTH - WIDTH / 2, x));
     }
 
-    /**
-     * Returns true while the short perfect-guard window is active.
-     * CombatSystem should consume this when an attack connects.
-     */
+    /** True while the short perfect-guard window is active. */
     public boolean isPerfectGuardActive() {
         return blocking && parryWindowTimer > 0;
     }
 
-    /**
-     * Consume a successful parry opportunity.
-     * Returns false if the timing window has expired or was already used.
-     */
+    /** Consume a successful parry opportunity. */
     public boolean consumePerfectGuard() {
         if (!isPerfectGuardActive()) {
             return false;
@@ -571,10 +590,7 @@ public abstract class Fighter {
         return true;
     }
 
-    /**
-     * Briefly stagger the attacker after a successful parry.
-     * This does not deal damage.
-     */
+    /** Briefly stagger the attacker after a successful parry. */
     public void staggerFromParry() {
         if (state == FighterState.KO) {
             return;
@@ -619,7 +635,6 @@ public abstract class Fighter {
 
         hitFlashTimer = HIT_FLASH_DURATION;
 
-        // A normal hit interrupts blocking, attacks, dash and dodge.
         blocking = false;
         parryWindowTimer = 0;
 
@@ -637,6 +652,8 @@ public abstract class Fighter {
                 ? knockback
                 : 0;
 
+        launched = false;
+
         if (health <= 0) {
             health = 0;
             state = FighterState.KO;
@@ -649,6 +666,51 @@ public abstract class Fighter {
                     ? Math.max(0, stunSeconds)
                     : 0;
         }
+    }
+
+    /**
+     * Called when a launcher successfully hits.
+     * Applies normal hit effects and launches the target upward.
+     */
+    public void takeLauncherHit(
+            int amount,
+            double stunSeconds,
+            double knockback,
+            double launchVelocity) {
+
+        takeHit(amount, stunSeconds, knockback);
+
+        if (state != FighterState.KO) {
+            vy = -Math.abs(
+                    Double.isFinite(launchVelocity)
+                            ? launchVelocity
+                            : LAUNCH_VELOCITY);
+
+            onGround = false;
+            launched = true;
+        }
+    }
+
+    /**
+     * Applies a follow-up hit to a fighter who is already airborne
+     * from a launcher. Preserves the existing vertical momentum.
+     */
+    public void takeAirComboHit(
+            int amount,
+            double stunSeconds,
+            double knockback) {
+
+        takeHit(amount, stunSeconds, knockback);
+
+        if (state != FighterState.KO) {
+            launched = true;
+            onGround = false;
+        }
+    }
+
+    /** True when this fighter is currently in a launcher juggle. */
+    public boolean isLaunched() {
+        return launched;
     }
 
     /**
@@ -666,11 +728,11 @@ public abstract class Fighter {
 
         health -= actualDamage;
 
-        // Blocking damage still generates a small amount of Ki.
         gainKi(actualDamage * 0.7);
 
         hitstunTimer = 0;
         knockbackVx = 0;
+        launched = false;
 
         dashTimer = 0;
         dodgeTimer = 0;
@@ -796,8 +858,7 @@ public abstract class Fighter {
         }
 
         boolean active = attackTimer >= currentAttack.startup
-                && attackTimer < currentAttack.startup
-                        + currentAttack.active;
+                && attackTimer < currentAttack.startup + currentAttack.active;
 
         if (!active) {
             return null;
@@ -807,9 +868,12 @@ public abstract class Fighter {
                 ? x + WIDTH / 2
                 : x - WIDTH / 2 - currentAttack.reach;
 
+        // Follow the fighter vertically during jumps and air attacks.
+        double hitboxY = y - STAND_HEIGHT + 20;
+
         return new Rect(
                 left,
-                y - STAND_HEIGHT + 20,
+                hitboxY,
                 currentAttack.reach,
                 currentAttack.height);
     }
@@ -975,7 +1039,6 @@ public abstract class Fighter {
         // Successful parry flash.
         if (parryFlashTimer > 0) {
             double progress = parryFlashTimer / PARRY_FLASH_DURATION;
-
             double radius = 42 + (1 - progress) * 42;
 
             gc.setStroke(Color.WHITE.deriveColor(
