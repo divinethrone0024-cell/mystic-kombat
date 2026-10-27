@@ -1,4 +1,3 @@
-
 package mystic.engine;
 
 import java.util.EnumMap;
@@ -9,13 +8,18 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 
 import mystic.common.Constants;
+import mystic.common.Difficulty;
+import mystic.common.GameMode;
 import mystic.common.GameState;
+import mystic.common.Roster;
 import mystic.fighters.Fighter;
 import mystic.fighters.MysticMage;
 import mystic.fighters.ShadowVigilante;
+import mystic.fighters.SpeedsterSonic;
 
 /**
- * Manages the game loop, screen switching, character selection,
+ * Manages the game loop, screen switching (with transitions),
+ * game mode, difficulty, arena and character selection,
  * time scaling, and match results.
  */
 public class GameEngine {
@@ -24,9 +28,16 @@ public class GameEngine {
     private final InputManager input;
 
     private final Map<GameState, Screen> screens = new EnumMap<>(GameState.class);
+    private final Transition transition = new Transition();
 
     private GameState state = GameState.MENU;
 
+    // ---------------- MODE / DIFFICULTY / ARENA ----------------
+    private GameMode mode = GameMode.LOCAL_2P;
+    private Difficulty difficulty = Difficulty.MEDIUM;
+    private int arena = 0;
+
+    // ---------------- MATCH RESULTS ----------------
     private String matchWinner = "";
     private int player1MatchWins;
     private int player2MatchWins;
@@ -37,7 +48,8 @@ public class GameEngine {
     private long lastNanos = 0;
     private AnimationTimer gameTimer;
 
-    // 0 = Mystic Mage, 1 = Shadow Vigilante
+    // 0 = Mystic Mage, 1 = Shadow Vigilante, 2 = Speedster Sonic, 3 = Plumber
+    // Brawler
     private int player1Choice = 0;
     private int player2Choice = 1;
 
@@ -54,14 +66,22 @@ public class GameEngine {
         return state;
     }
 
-    /**
-     * Switch screens and restore normal gameplay speed.
-     */
+    // ---------------- SCREEN SWITCHING ----------------
+
+    /** Switch screens with the shard-wipe transition. */
     public void changeState(GameState next) {
-        if (next == null) {
+        if (next == null || transition.isActive()) {
             return;
         }
+        // At startup there is nothing to wipe from.
+        if (gameTimer == null || screens.get(state) == null) {
+            applyState(next);
+            return;
+        }
+        transition.start(() -> applyState(next));
+    }
 
+    private void applyState(GameState next) {
         state = next;
 
         // Prevent slow motion from leaking into another screen.
@@ -69,11 +89,43 @@ public class GameEngine {
         lastNanos = 0;
 
         Screen screen = screens.get(state);
-
         if (screen != null) {
             screen.onEnter();
         }
     }
+
+    // ---------------- MODE / DIFFICULTY / ARENA API ----------------
+
+    public GameMode getMode() {
+        return mode;
+    }
+
+    public void setMode(GameMode mode) {
+        this.mode = (mode == null) ? GameMode.LOCAL_2P : mode;
+    }
+
+    public Difficulty getDifficulty() {
+        return difficulty;
+    }
+
+    public void setDifficulty(Difficulty difficulty) {
+        this.difficulty = (difficulty == null) ? Difficulty.MEDIUM : difficulty;
+    }
+
+    /** True when player 2 should be controlled by the AI. */
+    public boolean isVsAI() {
+        return mode == GameMode.SOLO;
+    }
+
+    public int getArena() {
+        return arena;
+    }
+
+    public void setArena(int arena) {
+        this.arena = Math.max(0, arena);
+    }
+
+    // ---------------- TIME SCALE ----------------
 
     public double getTimeScale() {
         return timeScale;
@@ -84,17 +136,12 @@ public class GameEngine {
             this.timeScale = 1.0;
             return;
         }
-
         this.timeScale = Math.max(0.0, Math.min(timeScale, 1.0));
     }
 
     // ---------------- MATCH RESULTS ----------------
 
-    public void setMatchResult(
-            String winner,
-            int player1Wins,
-            int player2Wins) {
-
+    public void setMatchResult(String winner, int player1Wins, int player2Wins) {
         this.matchWinner = winner;
         this.player1MatchWins = player1Wins;
         this.player2MatchWins = player2Wins;
@@ -123,11 +170,11 @@ public class GameEngine {
     }
 
     public void setPlayer1Choice(int choice) {
-        player1Choice = Math.floorMod(choice, 2);
+        player1Choice = Math.floorMod(choice, Roster.PLAYABLE);
     }
 
     public void setPlayer2Choice(int choice) {
-        player2Choice = Math.floorMod(choice, 2);
+        player2Choice = Math.floorMod(choice, Roster.PLAYABLE);
     }
 
     public Fighter createFighter(int player, double startX) {
@@ -145,8 +192,17 @@ public class GameEngine {
         if (choice == 0) {
             return new MysticMage(player, startX);
         }
+        if (choice == 1) {
+            return new ShadowVigilante(player, startX);
+        }
+        if (choice == 2) {
+            return new SpeedsterSonic(player, startX);
+        }
 
-        return new ShadowVigilante(player, startX);
+        // Choice 3 (Plumber Brawler): enable once PlumberBrawler.java exists
+        // and Roster.PLAYABLE is 4. Until then, fall back safely.
+        // return new mystic.fighters.PlumberBrawler(player, startX);
+        return new MysticMage(player, startX);
     }
 
     // ---------------- GAME LOOP ----------------
@@ -156,7 +212,7 @@ public class GameEngine {
             return;
         }
 
-        changeState(GameState.MENU);
+        changeState(GameState.SPLASH);
 
         gameTimer = new AnimationTimer() {
             @Override
@@ -182,29 +238,25 @@ public class GameEngine {
     private void tick(double dt) {
         Screen screen = screens.get(state);
 
-        if (screen != null) {
-            double scaledDt = dt * timeScale;
-            screen.update(scaledDt, input);
+        // Freeze screen logic during a transition so keys can't fire twice.
+        if (screen != null && !transition.isActive()) {
+            screen.update(dt * timeScale, input);
         }
+        transition.update(dt);
 
         gc.setFill(Color.BLACK);
-        gc.fillRect(
-                0,
-                0,
-                Constants.WIDTH,
-                Constants.HEIGHT);
+        gc.fillRect(0, 0, Constants.WIDTH, Constants.HEIGHT);
 
         // Render using real frames even during slow motion.
         if (screen != null) {
             screen.render(gc);
         }
+        transition.render(gc);
 
         input.endFrame();
     }
 
-    /**
-     * Stop the game loop when shutting down the game.
-     */
+    /** Stop the game loop when shutting down the game. */
     public void stop() {
         if (gameTimer != null) {
             gameTimer.stop();

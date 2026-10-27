@@ -63,6 +63,7 @@ public class InputManager {
         p1.put(Action.DODGE, KeyCode.I);
         p1.put(Action.LAUNCHER, KeyCode.H);
         p1.put(Action.ULTIMATE, KeyCode.U);
+        p1.put(Action.SPECIAL, KeyCode.O);
 
         // ================ PLAYER 2 ================
         // LEFT / RIGHT : Move
@@ -91,6 +92,7 @@ public class InputManager {
         p2.put(Action.DODGE, KeyCode.DIGIT6);
         p2.put(Action.LAUNCHER, KeyCode.DIGIT5);
         p2.put(Action.ULTIMATE, KeyCode.DIGIT0);
+        p2.put(Action.SPECIAL, KeyCode.DIGIT7);
     }
 
     /**
@@ -178,6 +180,11 @@ public class InputManager {
     public boolean wasPressed(int player, Action action) {
         KeyCode key = getControls(player).get(action);
         return key != null && pressedThisFrame.contains(key);
+    }
+
+    /** True if any key was newly pressed this frame. */
+    public boolean anyKeyPressed() {
+        return !pressedThisFrame.isEmpty();
     }
 
     /**

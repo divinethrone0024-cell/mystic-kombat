@@ -13,5 +13,6 @@ public enum Action {
     BLOCK,
     DASH,
     DODGE,
-    LAUNCHER
+    LAUNCHER,
+    SPECIAL
 }

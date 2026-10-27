@@ -13,6 +13,7 @@ import mystic.common.Constants;
 import mystic.common.FighterState;
 import mystic.common.Rect;
 import mystic.engine.InputManager;
+import mystic.engine.SpriteAnimation;
 
 /** Shared behaviour of every fighter. */
 public abstract class Fighter {
@@ -107,6 +108,17 @@ public abstract class Fighter {
     private double dodgeCooldownTimer = 0.0;
     private double dodgeDirection = 0.0;
 
+    // Optional sprite animation. Combat logic and hitboxes remain unchanged.
+    private SpriteAnimation spriteAnimation;
+    private double spriteWidth = 96.0;
+    private double spriteHeight = 96.0;
+
+    // Character-specific special-move support. Existing combat behaviour is
+    // preserved.
+    private double specialCooldownTimer = 0.0;
+    private double specialEffectTimer = 0.0;
+    private boolean specialActive = false;
+
     protected Fighter(
             String name,
             int maxHealth,
@@ -123,6 +135,20 @@ public abstract class Fighter {
         this.player = player;
         this.startX = startX;
         this.color = color;
+
+        // The mage sheet is a single row of 14 frames, each 64 x 64.
+        // Other fighters keep the existing fallback renderer until their atlas
+        // rows are mapped explicitly.
+        if ("Mystic Mage".equals(name)) {
+            spriteAnimation = new SpriteAnimation(
+                    "/assets/characters/mage/mage_guardian-blue.png",
+                    64,
+                    64,
+                    14,
+                    10.0);
+            spriteWidth = 96.0;
+            spriteHeight = 96.0;
+        }
 
         resetForRound();
     }
@@ -170,6 +196,10 @@ public abstract class Fighter {
         dodgeCooldownTimer = 0;
         dodgeDirection = 0;
 
+        specialCooldownTimer = 0.0;
+        specialEffectTimer = 0.0;
+        specialActive = false;
+
         state = FighterState.IDLE;
         facingRight = startX < Constants.WIDTH / 2.0;
     }
@@ -177,6 +207,67 @@ public abstract class Fighter {
     /** Optional character-specific ultimate hook. */
     public void useUltimate() {
         // Character-specific behaviour can be implemented in subclasses.
+    }
+
+    /**
+     * Attempts to activate this fighter's character-specific special move.
+     * Subclasses should override performSpecialMove(Fighter) to implement it.
+     * Returns true only when the special move was successfully activated.
+     */
+    public boolean activateSpecialMove(Fighter opponent) {
+        if (opponent == null || isKO() || isUltimateActive()
+                || specialCooldownTimer > 0.0 || specialActive) {
+            return false;
+        }
+
+        if (!performSpecialMove(opponent)) {
+            return false;
+        }
+
+        specialActive = true;
+        specialEffectTimer = getSpecialEffectDuration();
+        specialCooldownTimer = getSpecialCooldown();
+        return true;
+    }
+
+    /** Override in a fighter subclass to apply its unique special-move effect. */
+    protected boolean performSpecialMove(Fighter opponent) {
+        return false;
+    }
+
+    /** Display name used by HUD or combat messages. */
+    public String getSpecialMoveName() {
+        return "SPECIAL MOVE";
+    }
+
+    /** Default cooldown in seconds; subclasses may override. */
+    public double getSpecialCooldown() {
+        return 3.0;
+    }
+
+    /** Default visual-active duration in seconds; subclasses may override. */
+    protected double getSpecialEffectDuration() {
+        return 0.35;
+    }
+
+    public double getSpecialCooldownRemaining() {
+        return specialCooldownTimer;
+    }
+
+    public boolean isSpecialActive() {
+        return specialActive;
+    }
+
+    private void updateSpecialMoveTimers(double dt) {
+        if (specialCooldownTimer > 0.0) {
+            specialCooldownTimer = Math.max(0.0, specialCooldownTimer - dt);
+        }
+        if (specialEffectTimer > 0.0) {
+            specialEffectTimer = Math.max(0.0, specialEffectTimer - dt);
+            if (specialEffectTimer == 0.0) {
+                specialActive = false;
+            }
+        }
     }
 
     public void update(
@@ -191,6 +282,11 @@ public abstract class Fighter {
         updateUltimateEffect(dt);
         updateHitFlash(dt);
         updateMovementAbilityTimers(dt);
+        updateSpecialMoveTimers(dt);
+
+        if (spriteAnimation != null) {
+            spriteAnimation.update(dt);
+        }
 
         parryFlashTimer = Math.max(0, parryFlashTimer - dt);
         parryWindowTimer = Math.max(0, parryWindowTimer - dt);
@@ -969,21 +1065,49 @@ public abstract class Fighter {
             gc.setLineWidth(1);
         }
 
-        gc.setFill(body);
-        gc.fillRect(hb.x(), hb.y(), hb.w(), hb.h());
+        if (spriteAnimation != null) {
+            // x is the fighter's horizontal centre and y is the ground line.
+            // Draw from the ground up so the sprite stays anchored while jumping.
+            double drawX = x - spriteWidth / 2.0;
+            double drawY = y - spriteHeight;
 
-        // Eyes.
-        gc.setFill(Color.WHITE);
+            spriteAnimation.draw(
+                    gc,
+                    drawX,
+                    drawY,
+                    spriteWidth,
+                    spriteHeight,
+                    !facingRight);
 
-        double eyeX = facingRight
-                ? hb.x() + hb.w() - 18
-                : hb.x() + 6;
+            // Preserve the hit flash visually without changing collision data.
+            if (hitFlashTimer > 0 && !blocking) {
+                gc.save();
+                try {
+                    gc.setGlobalAlpha(0.30);
+                    gc.setFill(Color.WHITE);
+                    gc.fillRect(drawX, drawY, spriteWidth, spriteHeight);
+                } finally {
+                    gc.restore();
+                }
+            }
+        } else {
+            // Existing fallback rendering for fighters without configured sprites.
+            gc.setFill(body);
+            gc.fillRect(hb.x(), hb.y(), hb.w(), hb.h());
 
-        gc.fillRect(
-                eyeX,
-                hb.y() + 14,
-                12,
-                10);
+            // Eyes.
+            gc.setFill(Color.WHITE);
+
+            double eyeX = facingRight
+                    ? hb.x() + hb.w() - 18
+                    : hb.x() + 6;
+
+            gc.fillRect(
+                    eyeX,
+                    hb.y() + 14,
+                    12,
+                    10);
+        }
 
         // Dash / dodge status labels.
         if (isDashing() || isDodging()) {

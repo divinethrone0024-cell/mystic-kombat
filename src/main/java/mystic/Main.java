@@ -7,8 +7,11 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.stage.Stage;
 
+import mystic.engine.ModeSelectScreen;
 import mystic.common.Constants;
 import mystic.common.GameState;
+import mystic.engine.ArenaSelectScreen;
+import mystic.engine.BookSelectScreen;
 import mystic.engine.CharacterSelectScreen;
 import mystic.engine.VersusScreen;
 import mystic.engine.CombatScreen;
@@ -18,6 +21,7 @@ import mystic.engine.MainMenuScreen;
 import mystic.engine.ResultScreen;
 import mystic.engine.SettingsScreen;
 import mystic.engine.SoundManager;
+import mystic.engine.SplashScreen;
 
 public class Main extends Application {
 
@@ -34,12 +38,17 @@ public class Main extends Application {
 
                 // Register game screens.
                 engine.register(
+                                GameState.SPLASH,
+                                 new SplashScreen(engine));
+                engine.register(
                                 GameState.MENU,
                                 new MainMenuScreen(engine));
 
                 engine.register(
-                                GameState.CHARACTER_SELECT,
-                                new CharacterSelectScreen(engine));
+                                GameState.MODE_SELECT,
+                                new ModeSelectScreen(engine));
+                engine.register(GameState.CHARACTER_SELECT, new BookSelectScreen(engine));
+                engine.register(GameState.ARENA_SELECT, new ArenaSelectScreen(engine));
 
                 engine.register(
                                 GameState.VERSUS,

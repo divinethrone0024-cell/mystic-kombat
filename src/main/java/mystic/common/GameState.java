@@ -1,9 +1,12 @@
 package mystic.common;
 
-/** The screens of the game. Only one is active at a time. */
 public enum GameState {
+    INTRO,
+    SPLASH,
     MENU,
+    MODE_SELECT, // <-- new
     CHARACTER_SELECT,
+    ARENA_SELECT,
     VERSUS,
     COMBAT,
     RESULT,

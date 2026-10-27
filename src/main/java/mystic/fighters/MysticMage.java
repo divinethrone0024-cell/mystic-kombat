@@ -19,12 +19,16 @@ public class MysticMage extends Fighter {
 
     @Override
     public void useUltimate() {
-        // The visual effect is handled by UltimateEffect.
         System.out.println("ARCANE CATACLYSM!");
     }
 
     @Override
     public UltimateType getUltimateType() {
         return UltimateType.ARCANE_CATACLYSM;
+    }
+
+    @Override
+    public int getUltimateDamage() {
+        return 38;
     }
 }

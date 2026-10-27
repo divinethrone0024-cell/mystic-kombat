@@ -1,8 +1,15 @@
 package mystic.engine;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.net.URL;
 import java.util.EnumMap;
 import java.util.Map;
+import javax.sound.sampled.AudioFileFormat;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
 
 import javafx.scene.media.AudioClip;
 
@@ -11,6 +18,7 @@ import javafx.scene.media.AudioClip;
  *
  * Features:
  * - Sound effects for combat actions.
+ * - Page turn and book open sound effects for the Tome Character Select.
  * - Looping arena background music.
  * - Independent music and SFX volume controls.
  * - Independent music and SFX mute controls.
@@ -24,7 +32,9 @@ public final class SoundManager {
         HIT,
         DASH,
         ULTIMATE,
-        ROUND
+        ROUND,
+        PAGE_TURN,
+        BOOK_OPEN
     }
 
     private static final Map<Sound, AudioClip> CLIPS = new EnumMap<>(Sound.class);
@@ -57,6 +67,10 @@ public final class SoundManager {
         load(Sound.ULTIMATE, "/assets/audio/ultimate.wav");
         load(Sound.ROUND, "/assets/audio/round.wav");
 
+        // Load or synthesize tome page turn and book open sounds
+        loadOrSynthesize(Sound.PAGE_TURN, "/assets/audio/page_turn.wav", true);
+        loadOrSynthesize(Sound.BOOK_OPEN, "/assets/audio/book_open.wav", false);
+
         try {
             URL url = SoundManager.class.getResource(
                     "/assets/audio/arena_theme.wav");
@@ -83,6 +97,50 @@ public final class SoundManager {
             }
         } catch (RuntimeException | LinkageError ignored) {
             // Audio is optional.
+        }
+    }
+
+    private static void loadOrSynthesize(Sound sound, String resourcePath, boolean isPageTurn) {
+        try {
+            URL url = SoundManager.class.getResource(resourcePath);
+            if (url != null) {
+                CLIPS.put(sound, new AudioClip(url.toExternalForm()));
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+
+        // Fallback procedural generator so no missing wav file can break the game
+        try {
+            int rate = 44100;
+            double duration = isPageTurn ? 0.22 : 0.45;
+            int total = (int) (duration * rate);
+            byte[] raw = new byte[total * 2];
+            java.util.Random r = new java.util.Random();
+
+            for (int i = 0; i < total; i++) {
+                double progress = (double) i / total;
+                double env = Math.sin(progress * Math.PI) * (1.0 - progress * 0.4);
+                double sampleVal;
+                if (isPageTurn) {
+                    sampleVal = (r.nextDouble() * 2.0 - 1.0) * env * 14000;
+                } else {
+                    double freq = 90.0 + (1.0 - progress) * 140.0;
+                    sampleVal = Math.sin(2.0 * Math.PI * freq * (i / (double) rate)) * env * 17000;
+                }
+                short val = (short) sampleVal;
+                raw[2 * i] = (byte) (val & 0xff);
+                raw[2 * i + 1] = (byte) ((val >> 8) & 0xff);
+            }
+
+            AudioFormat fmt = new AudioFormat(rate, 16, 1, true, false);
+            AudioInputStream ais = new AudioInputStream(new ByteArrayInputStream(raw), fmt, total);
+            File tempWav = File.createTempFile("mystic_sfx_" + sound.name(), ".wav");
+            tempWav.deleteOnExit();
+            AudioSystem.write(ais, AudioFileFormat.Type.WAVE, tempWav);
+
+            CLIPS.put(sound, new AudioClip(tempWav.toURI().toString()));
+        } catch (Exception ignored) {
         }
     }
 
