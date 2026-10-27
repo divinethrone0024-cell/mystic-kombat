@@ -218,8 +218,6 @@ public class CombatScreen implements Screen {
                         SoundManager.play(SoundManager.Sound.HIT);
                 }
 
-                keepApart();
-
                 timeRemaining -= safeDt;
 
                 // Determine the round winner.
@@ -348,26 +346,6 @@ public class CombatScreen implements Screen {
                 }
         }
 
-        // Prevent fighters from walking through one another.
-        private void keepApart() {
-                double distance = Math.abs(
-                                p1.getX() - p2.getX());
-
-                double minimumDistance = Fighter.WIDTH;
-
-                if (distance < minimumDistance) {
-                        double push = (minimumDistance - distance) / 2.0;
-
-                        if (p1.getX() < p2.getX()) {
-                                p1.shiftX(-push);
-                                p2.shiftX(push);
-                        } else {
-                                p1.shiftX(push);
-                                p2.shiftX(-push);
-                        }
-                }
-        }
-
         @Override
         public void render(GraphicsContext gc) {
                 // The arena remains stable while the fighters shake.
@@ -425,61 +403,28 @@ public class CombatScreen implements Screen {
                 }
         }
 
+        /**
+         * Draw the animated Mystic Kombat arena. The renderer owns the
+         * arena's layered background, glowing runes, floor details and
+         * ambient particles. Keeping this call separate from the fighter
+         * render transform means screen shake affects the combatants and
+         * combat effects without making the HUD jump around.
+         */
         private void drawArena(GraphicsContext gc) {
-                double width = Constants.WIDTH;
-                double height = Constants.HEIGHT;
-                double ground = Constants.GROUND_Y;
-
-                // Dark multiverse arena background.
-                gc.setFill(Color.rgb(9, 11, 25));
-                gc.fillRect(0, 0, width, height);
-
-                // Ambient blue and purple lighting.
-                gc.setFill(Color.rgb(35, 55, 125, 0.24));
-                gc.fillOval(
-                                width * 0.08,
-                                height * 0.12,
-                                width * 0.34,
-                                height * 0.50);
-
-                gc.setFill(Color.rgb(115, 35, 105, 0.20));
-                gc.fillOval(
-                                width * 0.58,
-                                height * 0.12,
-                                width * 0.34,
-                                height * 0.50);
-
-                // Floor.
-                gc.setFill(Color.rgb(19, 22, 39));
-                gc.fillRect(
-                                0,
-                                ground,
-                                width,
-                                height - ground);
-
-                gc.setStroke(Color.rgb(212, 175, 55, 0.8));
-                gc.setLineWidth(2);
-                gc.strokeLine(0, ground, width, ground);
-
-                // Floor perspective lines.
-                gc.setStroke(Color.rgb(100, 115, 160, 0.18));
-                gc.setLineWidth(1);
-
-                for (int x = 0; x < width; x += 50) {
-                        gc.strokeLine(
-                                        x,
-                                        ground,
-                                        x - 40,
-                                        height);
+                // Render the arena selected in ArenaSelectScreen. The renderer's
+                // floor line uses the same baseline as fighter physics.
+                double cameraX = 0;
+                if (p1 != null && p2 != null) {
+                        cameraX = (p1.getX() + p2.getX()) / 2.0 - Constants.WIDTH / 2.0;
                 }
 
-                // Center arena line.
-                gc.setStroke(Color.rgb(212, 175, 55, 0.22));
-                gc.strokeLine(
-                                width / 2.0,
-                                ground,
-                                width / 2.0,
-                                height);
+                arenaRenderer.draw(
+                                gc,
+                                Constants.WIDTH,
+                                Constants.HEIGHT,
+                                engine.getArena(),
+                                Constants.GROUND_Y,
+                                cameraX);
         }
 
         private void drawHUD(GraphicsContext gc) {
