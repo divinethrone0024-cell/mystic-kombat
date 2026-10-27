@@ -20,7 +20,6 @@ import mystic.fighters.Fighter;
  */
 public class CombatSystem {
 
-    private static final int ULTIMATE_DAMAGE = 35;
     private static final double ULTIMATE_STUN = 0.65;
     private static final double ULTIMATE_KNOCKBACK = 650.0;
 
@@ -53,6 +52,35 @@ public class CombatSystem {
     private final List<ImpactEffect> impactEffects = new ArrayList<>();
 
     private double hitStopTimer;
+
+    // Selected arena: 0 Sanctum, 1 Crimson Mirror, 2 Blood Moon, 3 Multiverse
+    // Breakdown.
+    private int arenaIndex;
+
+    public void setArenaIndex(int arenaIndex) {
+        this.arenaIndex = Math.floorMod(arenaIndex, 4);
+    }
+
+    public int getArenaIndex() {
+        return arenaIndex;
+    }
+
+    /**
+     * A small, readable arena affinity bonus; all other fighters remain at 100%.
+     */
+    private double arenaAffinity(Fighter attacker) {
+        if (attacker == null)
+            return 1.0;
+        String fighter = attacker.getClass().getSimpleName();
+        boolean favored = switch (arenaIndex) {
+            case 0 -> fighter.equals("MysticMage");
+            case 1 -> fighter.equals("SpeedsterSonic");
+            case 2 -> fighter.equals("ShadowVigilante");
+            case 3 -> fighter.equals("PlumberBrawler");
+            default -> false;
+        };
+        return favored ? 1.12 : 1.0;
+    }
 
     // Screen-shake state.
     private double screenShakeTimer;
@@ -221,9 +249,10 @@ public class CombatSystem {
                 MIN_DAMAGE_MULTIPLIER,
                 1.0 - (combo.count - 1) * DAMAGE_SCALE_PER_HIT);
 
+        double arenaMultiplier = arenaAffinity(attacker);
         return Math.max(
                 1,
-                (int) Math.round(baseDamage * multiplier));
+                (int) Math.round(baseDamage * multiplier * arenaMultiplier));
     }
 
     /** Start a short hit-stop interval. */
@@ -269,7 +298,7 @@ public class CombatSystem {
         } else if (blocked) {
             effectColor = BLOCK_COLOR;
         } else if (ultimate) {
-            effectColor = ULTIMATE_COLOR;
+            effectColor = getUltimateColor(attacker);
         } else if (heavy) {
             effectColor = HEAVY_COLOR;
         } else {
@@ -291,6 +320,17 @@ public class CombatSystem {
                 parry,
                 effectColor,
                 direction));
+    }
+
+    /**
+     * Return the primary color assigned to a fighter's ultimate.
+     */
+    private Color getUltimateColor(Fighter fighter) {
+        if (fighter == null || fighter.getUltimateType() == null) {
+            return ULTIMATE_COLOR;
+        }
+
+        return fighter.getUltimateType().getPrimaryColor();
     }
 
     /**
@@ -535,19 +575,21 @@ public class CombatSystem {
 
         boolean guarded = defender.isBlocking();
 
+        // Use the attacker's own ultimate damage value.
+        int ultimateDamage = Math.max(1, attacker.getUltimateDamage());
         int damage;
 
         if (guarded) {
             damage = Math.max(
                     1,
                     (int) Math.ceil(
-                            ULTIMATE_DAMAGE
+                            ultimateDamage
                                     * ULTIMATE_BLOCK_DAMAGE_MULTIPLIER));
         } else {
             damage = registerHit(
                     attacker,
                     defender,
-                    ULTIMATE_DAMAGE);
+                    ultimateDamage);
 
             breakCombo(defender);
         }
@@ -781,9 +823,10 @@ public class CombatSystem {
 
                         gc.setGlobalAlpha(progress * 0.9);
 
+                        // Preserve gold accents while using fighter colors.
                         gc.setFill(
                                 i % 2 == 0
-                                        ? ULTIMATE_COLOR
+                                        ? getEffectAccentColor(effect)
                                         : Color.WHITE);
 
                         gc.fillOval(
@@ -825,5 +868,13 @@ public class CombatSystem {
             // Restore graphics settings for the HUD and next frame.
             gc.restore();
         }
+    }
+
+    /**
+     * The original ImpactEffect stores the selected color rather than
+     * a Fighter reference, so use that color for its ultimate accent.
+     */
+    private Color getEffectAccentColor(ImpactEffect effect) {
+        return effect.color != null ? effect.color : ULTIMATE_COLOR;
     }
 }

@@ -5,17 +5,33 @@ import javafx.scene.paint.Color;
 
 public enum UltimateType {
 
+    // Original Mystic Mage ultimate.
     ARCANE_CATACLYSM(
             "ARCANE CATACLYSM",
             Color.MEDIUMPURPLE,
             Color.VIOLET,
             Color.GOLD),
 
+    // Original Shadow Vigilante ultimate.
     ECLIPSE_BREAKER(
             "ECLIPSE BREAKER",
             Color.CRIMSON,
             Color.DARKRED,
-            Color.ORANGERED);
+            Color.ORANGERED),
+
+    // New Speedster Sonic ultimate.
+    SONIC_OVERDRIVE(
+            "SONIC OVERDRIVE",
+            Color.DEEPSKYBLUE,
+            Color.DODGERBLUE,
+            Color.LIGHTCYAN),
+
+    // New Plumber Brawler ultimate.
+    TITAN_IMPACT(
+            "TITAN IMPACT",
+            Color.FIREBRICK,
+            Color.DARKRED,
+            Color.ORANGE);
 
     private final String displayName;
     private final Color primaryColor;

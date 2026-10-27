@@ -19,12 +19,16 @@ public class ShadowVigilante extends Fighter {
 
     @Override
     public void useUltimate() {
-        // The visual effect is handled by UltimateEffect.
         System.out.println("ECLIPSE BREAKER!");
     }
 
     @Override
     public UltimateType getUltimateType() {
         return UltimateType.ECLIPSE_BREAKER;
+    }
+
+    @Override
+    public int getUltimateDamage() {
+        return 34;
     }
 }
