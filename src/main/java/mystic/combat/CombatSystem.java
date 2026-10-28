@@ -1,4 +1,3 @@
-
 package mystic.combat;
 
 import java.util.ArrayList;
@@ -15,8 +14,9 @@ import mystic.fighters.Fighter;
 
 /**
  * Handles attacks, combo tracking, damage scaling,
- * Ultimate Incantations, blocking, perfect guards,
- * dodge evasion, hit-stop, screen shake, and impact effects.
+ * Ultimate Incantations, signature-move projectiles, blocking,
+ * perfect guards, dodge evasion, hit-stop, screen shake,
+ * and impact effects.
  */
 public class CombatSystem {
 
@@ -39,6 +39,11 @@ public class CombatSystem {
     private static final double NORMAL_BLOCK_DAMAGE_MULTIPLIER = 0.20;
     private static final double ULTIMATE_BLOCK_DAMAGE_MULTIPLIER = 0.50;
 
+    // Projectile (signature move) balance.
+    private static final double PROJECTILE_STUN = 0.35;
+    private static final double PROJECTILE_KNOCKBACK = 350.0;
+    private static final double PROJECTILE_BLOCK_MULTIPLIER = 0.20;
+
     // Impact effect colors.
     private static final Color LIGHT_COLOR = Color.CYAN;
     private static final Color HEAVY_COLOR = Color.ORANGERED;
@@ -50,6 +55,7 @@ public class CombatSystem {
 
     private final Map<Fighter, ComboData> combos = new IdentityHashMap<>();
     private final List<ImpactEffect> impactEffects = new ArrayList<>();
+    private final List<ArcaneProjectile> projectiles = new ArrayList<>();
 
     private double hitStopTimer;
 
@@ -71,15 +77,9 @@ public class CombatSystem {
     private double arenaAffinity(Fighter attacker) {
         if (attacker == null)
             return 1.0;
-        String fighter = attacker.getClass().getSimpleName();
-        boolean favored = switch (arenaIndex) {
-            case 0 -> fighter.equals("MysticMage");
-            case 1 -> fighter.equals("SpeedsterSonic");
-            case 2 -> fighter.equals("ShadowVigilante");
-            case 3 -> fighter.equals("PlumberBrawler");
-            default -> false;
-        };
-        return favored ? 1.12 : 1.0;
+        return mystic.common.Arenas.damageMult(
+                arenaIndex, attacker.getClass().getSimpleName())
+                * attacker.getArenaAffinity(arenaIndex);
     }
 
     // Screen-shake state.
@@ -211,9 +211,12 @@ public class CombatSystem {
         combos.clear();
     }
 
-    /** Clear temporary effects, hit-stop, and screen shake. */
+    /**
+     * Clear temporary effects, projectiles, hit-stop, and screen shake.
+     */
     public void resetEffects() {
         impactEffects.clear();
+        projectiles.clear();
         hitStopTimer = 0;
         screenShakeTimer = 0;
         screenShakeDuration = 0;
@@ -299,6 +302,8 @@ public class CombatSystem {
             effectColor = BLOCK_COLOR;
         } else if (ultimate) {
             effectColor = getUltimateColor(attacker);
+        } else if (attacker.getImpactColor() != null) {
+            effectColor = attacker.getImpactColor();
         } else if (heavy) {
             effectColor = HEAVY_COLOR;
         } else {
@@ -354,6 +359,34 @@ public class CombatSystem {
                 false,
                 DODGE_COLOR,
                 attacker.isFacingRight() ? 1.0 : -1.0));
+    }
+
+    /** Impact effect placed at a projectile instead of between the fighters. */
+    private void addProjectileImpact(
+            double x,
+            double y,
+            boolean heavy,
+            boolean blocked,
+            boolean parry,
+            double direction) {
+
+        if (impactEffects.size() >= MAX_IMPACT_EFFECTS) {
+            impactEffects.remove(0);
+        }
+
+        Color color = parry ? PARRY_COLOR
+                : blocked ? BLOCK_COLOR
+                        : Color.VIOLET;
+
+        impactEffects.add(new ImpactEffect(
+                x,
+                y,
+                false,
+                heavy,
+                blocked,
+                parry,
+                color,
+                direction));
     }
 
     /**
@@ -496,7 +529,158 @@ public class CombatSystem {
         }
 
         // Reward the attacker with Mystic Energy.
-        attacker.gainKi(damage * 0.5);
+        attacker.gainKi(damage * 0.5 * attacker.getKiDealtMultiplier());
+    }
+
+    /**
+     * Use a fighter's signature move. If the move creates a projectile,
+     * it is tracked and resolved by this combat system.
+     *
+     * Returns true when the special move was successfully activated.
+     */
+    public boolean activateSpecial(
+            Fighter attacker,
+            Fighter defender) {
+
+        if (attacker == null
+                || defender == null
+                || attacker.isKO()
+                || defender.isKO()) {
+            return false;
+        }
+
+        if (!attacker.activateSpecialMove(defender)) {
+            return false;
+        }
+
+        ArcaneProjectile projectile = attacker.pollProjectile();
+
+        if (projectile != null) {
+            projectiles.add(projectile);
+        }
+
+        return true;
+    }
+
+    /**
+     * Move projectiles and resolve their hits.
+     * Call once per frame after resolve().
+     */
+    public void updateProjectiles(
+            double dt,
+            Fighter p1,
+            Fighter p2) {
+
+        if (!Double.isFinite(dt) || dt <= 0) {
+            return;
+        }
+
+        Iterator<ArcaneProjectile> iterator = projectiles.iterator();
+
+        while (iterator.hasNext()) {
+            ArcaneProjectile projectile = iterator.next();
+
+            projectile.update(dt);
+
+            Fighter owner = projectile.getOwner();
+            Fighter target = (owner == p1) ? p2 : p1;
+
+            if (projectile.isActive()
+                    && target != null
+                    && !projectile.hasEvaded()
+                    && projectile.hits(target)) {
+
+                resolveProjectileHit(projectile, owner, target);
+            }
+
+            if (!projectile.isActive()) {
+                iterator.remove();
+            }
+        }
+    }
+
+    private void resolveProjectileHit(
+            ArcaneProjectile projectile,
+            Fighter owner,
+            Fighter target) {
+
+        double direction = projectile.getDirection();
+
+        // Dodge: the projectile passes through harmlessly.
+        if (target.canEvadeAttack()) {
+            projectile.markEvaded();
+            addDodgeEffect(owner, target);
+            return;
+        }
+
+        // Perfect guard destroys the projectile.
+        if (target.consumePerfectGuard()) {
+            projectile.deactivate();
+
+            addProjectileImpact(
+                    projectile.getX(),
+                    projectile.getY(),
+                    false,
+                    false,
+                    true,
+                    direction);
+
+            triggerHitStop(PARRY_HIT_STOP * 0.7);
+            triggerScreenShake(0.12, 6);
+            return;
+        }
+
+        boolean guarded = target.isBlocking();
+        int damage;
+
+        if (guarded) {
+            damage = Math.max(
+                    1,
+                    (int) Math.ceil(
+                            projectile.getDamage()
+                                    * PROJECTILE_BLOCK_MULTIPLIER));
+
+            target.takeBlockedHit(damage);
+
+        } else {
+            damage = registerHit(
+                    owner,
+                    target,
+                    projectile.getDamage());
+
+            breakCombo(target);
+
+            if (target.isLaunched()) {
+                target.takeAirComboHit(
+                        damage,
+                        PROJECTILE_STUN,
+                        direction * PROJECTILE_KNOCKBACK);
+            } else {
+                target.takeHit(
+                        damage,
+                        PROJECTILE_STUN,
+                        direction * PROJECTILE_KNOCKBACK);
+            }
+        }
+
+        projectile.deactivate();
+        owner.gainKi(damage * 0.5 * owner.getKiDealtMultiplier());
+
+        addProjectileImpact(
+                projectile.getX(),
+                projectile.getY(),
+                true,
+                guarded,
+                false,
+                direction);
+
+        if (guarded) {
+            triggerHitStop(LIGHT_HIT_STOP * 0.5);
+            triggerScreenShake(0.05, 2);
+        } else {
+            triggerHitStop(HEAVY_HIT_STOP * 0.8);
+            triggerScreenShake(0.12, 6);
+        }
     }
 
     /**
@@ -643,7 +827,7 @@ public class CombatSystem {
     }
 
     /**
-     * Render enhanced impact rings, flashes and sparks.
+     * Render projectiles, then enhanced impact rings, flashes and sparks.
      * Call after rendering the fighters.
      */
     public void renderEffects(GraphicsContext gc) {
@@ -654,6 +838,10 @@ public class CombatSystem {
         gc.save();
 
         try {
+            for (ArcaneProjectile projectile : projectiles) {
+                projectile.render(gc);
+            }
+
             for (ImpactEffect effect : impactEffects) {
                 double progress = Math.max(
                         0,

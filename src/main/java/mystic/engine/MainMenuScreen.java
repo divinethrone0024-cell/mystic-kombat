@@ -21,8 +21,8 @@ public class MainMenuScreen implements Screen {
             new Item("START GAME", true),
             new Item("HOW TO PLAY", true),
             new Item("SETTINGS", true),
-            new Item("ARCADE  (soon)", false),
-            new Item("TRAINING  (soon)", false),
+            //new Item("ARCADE  (soon)", false),
+            //new Item("TRAINING  (soon)", false),
             new Item("QUIT", true),
     };
 
@@ -104,7 +104,7 @@ public class MainMenuScreen implements Screen {
             case 0 -> engine.changeState(GameState.MODE_SELECT);
             case 1 -> showRules = true;
             case 2 -> engine.changeState(GameState.SETTINGS);
-            case 5 -> Platform.exit();
+            case 3 -> Platform.exit();
             default -> {
             }
         }

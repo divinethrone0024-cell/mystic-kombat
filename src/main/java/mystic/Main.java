@@ -10,7 +10,9 @@ import javafx.stage.Stage;
 import mystic.engine.ModeSelectScreen;
 import mystic.common.Constants;
 import mystic.common.GameState;
+import mystic.engine.ArcadeScreen;
 import mystic.engine.ArenaSelectScreen;
+import mystic.engine.TrainingScreen;
 import mystic.engine.BookSelectScreen;
 import mystic.engine.CharacterSelectScreen;
 import mystic.engine.VersusScreen;
@@ -20,6 +22,7 @@ import mystic.engine.InputManager;
 import mystic.engine.MainMenuScreen;
 import mystic.engine.ResultScreen;
 import mystic.engine.SettingsScreen;
+import mystic.engine.SorceryUpgradeScreen; // NEW
 import mystic.engine.SoundManager;
 import mystic.engine.SplashScreen;
 
@@ -39,7 +42,7 @@ public class Main extends Application {
                 // Register game screens.
                 engine.register(
                                 GameState.SPLASH,
-                                 new SplashScreen(engine));
+                                new SplashScreen(engine));
                 engine.register(
                                 GameState.MENU,
                                 new MainMenuScreen(engine));
@@ -47,9 +50,12 @@ public class Main extends Application {
                 engine.register(
                                 GameState.MODE_SELECT,
                                 new ModeSelectScreen(engine));
+
+                engine.register(GameState.ARCADE, new ArcadeScreen(engine));
                 engine.register(GameState.CHARACTER_SELECT, new BookSelectScreen(engine));
                 engine.register(GameState.ARENA_SELECT, new ArenaSelectScreen(engine));
 
+                engine.register(GameState.TRAINING, new TrainingScreen(engine));
                 engine.register(
                                 GameState.VERSUS,
                                 new VersusScreen(engine));
@@ -64,6 +70,11 @@ public class Main extends Application {
                 engine.register(
                                 GameState.SETTINGS,
                                 new SettingsScreen(engine));
+
+                // NEW: Sorcery Upgradation (XP spending and fighter unlocks).
+                engine.register(
+                                GameState.SORCERY_UPGRADATION,
+                                new SorceryUpgradeScreen(engine));
 
                 Scene scene = new Scene(new Group(canvas));
 

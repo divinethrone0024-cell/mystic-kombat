@@ -8,7 +8,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 
 import mystic.common.Constants;
-import mystic.common.Difficulty;
+import mystic.ai.Difficulty;
 import mystic.common.GameMode;
 import mystic.common.GameState;
 import mystic.common.MysticTheme;
@@ -24,9 +24,9 @@ public class ModeSelectScreen implements Screen {
             new Card("2 PLAYERS", "1 v 1",
                     "Two sorcerers,\none keyboard.", GameMode.LOCAL_2P, true),
             new Card("ARCADE", "LADDER",
-                    "Climb the Gauntlet\nand face the boss.\n(coming soon)", GameMode.ARCADE, false),
+                    "Climb 10 trials.\nEvery foe is stronger.\nFace the boss.", GameMode.ARCADE, true),
             new Card("TRAINING", "MIRROR",
-                    "Practise combos and\nsee the hitboxes.\n(coming soon)", GameMode.TRAINING, false),
+                    "Practise combos and\nsee the hitboxes.\nA dummy that fights back.", GameMode.TRAINING, true),
     };
 
     private static final Difficulty[] LEVELS = Difficulty.values();
@@ -96,6 +96,9 @@ public class ModeSelectScreen implements Screen {
                 return;
             if (c.mode() == GameMode.SOLO) {
                 pickingDifficulty = true;
+            } else if (c.mode() == GameMode.ARCADE) {
+                engine.setMode(GameMode.ARCADE);
+                engine.changeState(GameState.ARCADE);
             } else {
                 engine.setMode(c.mode());
                 engine.changeState(GameState.CHARACTER_SELECT);

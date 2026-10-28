@@ -1,4 +1,3 @@
-
 package mystic.combat;
 
 import javafx.scene.paint.Color;
@@ -31,7 +30,49 @@ public enum UltimateType {
             "TITAN IMPACT",
             Color.FIREBRICK,
             Color.DARKRED,
-            Color.ORANGE);
+            Color.ORANGE),
+
+    // Flame Karateka.
+    DRAGON_FLAME_BARRAGE(
+            "DRAGON FLAME BARRAGE",
+            Color.ORANGERED,
+            Color.DARKORANGE,
+            Color.GOLD),
+
+    // Cyber Hunter.
+    PLASMA_OVERDRIVE(
+            "PLASMA OVERDRIVE",
+            Color.DODGERBLUE,
+            Color.DEEPSKYBLUE,
+            Color.WHITE),
+
+    // Street Striker.
+    HUNDRED_KICK_STORM(
+            "HUNDRED KICK STORM",
+            Color.LIMEGREEN,
+            Color.DARKOLIVEGREEN,
+            Color.YELLOW),
+
+    // Star Sage.
+    METEOR_RAIN(
+            "METEOR RAIN",
+            Color.GOLD,
+            Color.ORANGE,
+            Color.LIGHTYELLOW),
+
+    // Phantom Blade.
+    CRIMSON_MOON_FLURRY(
+            "CRIMSON MOON FLURRY",
+            Color.MEDIUMSLATEBLUE,
+            Color.DARKSLATEBLUE,
+            Color.LAVENDER),
+
+    // Toxic Toad.
+    POISON_BURST(
+            "POISON BURST",
+            Color.YELLOWGREEN,
+            Color.DARKGREEN,
+            Color.GREENYELLOW);
 
     private final String displayName;
     private final Color primaryColor;
