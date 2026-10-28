@@ -19,6 +19,7 @@ public final class ArcaneProjectile {
     private double x;
     private double y;
     private boolean active = true;
+    private boolean evaded = false;
 
     public ArcaneProjectile(Fighter owner) {
         this.owner = owner;
@@ -46,16 +47,23 @@ public final class ArcaneProjectile {
 
         Rect hurtbox = target.getHurtbox();
 
-        boolean overlaps = x + RADIUS >= hurtbox.x()
+        return x + RADIUS >= hurtbox.x()
                 && x - RADIUS <= hurtbox.x() + hurtbox.w()
                 && y + RADIUS >= hurtbox.y()
                 && y - RADIUS <= hurtbox.y() + hurtbox.h();
-
-        return overlaps;
     }
 
     public void deactivate() {
         active = false;
+    }
+
+    /** The target dodged this projectile; it passes through harmlessly. */
+    public void markEvaded() {
+        evaded = true;
+    }
+
+    public boolean hasEvaded() {
+        return evaded;
     }
 
     public boolean isActive() {
@@ -64,6 +72,10 @@ public final class ArcaneProjectile {
 
     public Fighter getOwner() {
         return owner;
+    }
+
+    public double getDirection() {
+        return direction;
     }
 
     public int getDamage() {
@@ -86,6 +98,16 @@ public final class ArcaneProjectile {
         gc.save();
 
         try {
+            // Fading trail behind the orb.
+            for (int i = 4; i >= 1; i--) {
+                double tx = x - direction * i * 16;
+                double r = RADIUS * (1.0 - i * 0.14);
+
+                gc.setGlobalAlpha(0.16 * (5 - i) / 4.0);
+                gc.setFill(Color.VIOLET);
+                gc.fillOval(tx - r, y - r, r * 2, r * 2);
+            }
+
             gc.setGlobalAlpha(0.28);
             gc.setFill(Color.VIOLET);
             gc.fillOval(x - 25, y - 25, 50, 50);

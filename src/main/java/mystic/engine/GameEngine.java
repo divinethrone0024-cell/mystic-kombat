@@ -8,19 +8,26 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 
 import mystic.common.Constants;
-import mystic.common.Difficulty;
+import mystic.ai.Difficulty;
 import mystic.common.GameMode;
 import mystic.common.GameState;
 import mystic.common.Roster;
+import mystic.fighters.CyberHunter;
 import mystic.fighters.Fighter;
+import mystic.fighters.FlameKarateka;
 import mystic.fighters.MysticMage;
+import mystic.fighters.PhantomBlade;
+import mystic.fighters.PlumberBrawler;
 import mystic.fighters.ShadowVigilante;
 import mystic.fighters.SpeedsterSonic;
+import mystic.fighters.StarSage;
+import mystic.fighters.StreetStriker;
+import mystic.fighters.ToxicToad;
 
 /**
  * Manages the game loop, screen switching (with transitions),
  * game mode, difficulty, arena and character selection,
- * time scaling, and match results.
+ * time scaling, match results and persistent progression.
  */
 public class GameEngine {
 
@@ -37,6 +44,47 @@ public class GameEngine {
     private Difficulty difficulty = Difficulty.MEDIUM;
     private int arena = 0;
 
+    public static final int ARCADE_TRIALS = 10;
+    private int arcadeTrial = 0;
+
+    // Opponent (Roster index) and arena for each Arcade trial. Edit freely.
+    private static final int[] ARCADE_OPPONENTS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 1 };
+    private static final int[] ARCADE_ARENAS = { 0, 1, 2, 3, 0, 1, 2, 3, 0, 3 };
+
+    public static final String[] TRIAL_NAMES = {
+            "The Mirror Gate", "The Ember Road", "The Silent Vault",
+            "The Chaos Rift", "The Crimson Spire", "The Hollow Court",
+            "The Storm Bridge", "The Blood Eclipse", "The Last Sanctum",
+            "The Final Incursion"
+    };
+
+    // ---------------- PROGRESSION ----------------
+    private final ProgressionManager progression = new ProgressionManager();
+    private int lastXpGained = 0;
+
+    /** Save ids, in the same order as Roster.HEROES. */
+    public static final String[] FIGHTER_IDS = {
+            "mage", "vigilante", "sonic", "plumber", "karateka",
+            "hunter", "striker", "sage", "blade", "toad"
+    };
+
+    public ProgressionManager getProgression() {
+        return progression;
+    }
+
+    public static String fighterId(int choice) {
+        return FIGHTER_IDS[Math.floorMod(choice, FIGHTER_IDS.length)];
+    }
+
+    public boolean isChoiceUnlocked(int choice) {
+        return progression.isUnlocked(fighterId(choice));
+    }
+
+    /** XP earned by the most recent Arcade result, for the result screen. */
+    public int getLastXpGained() {
+        return lastXpGained;
+    }
+
     // ---------------- MATCH RESULTS ----------------
     private String matchWinner = "";
     private int player1MatchWins;
@@ -48,8 +96,7 @@ public class GameEngine {
     private long lastNanos = 0;
     private AnimationTimer gameTimer;
 
-    // 0 = Mystic Mage, 1 = Shadow Vigilante, 2 = Speedster Sonic, 3 = Plumber
-    // Brawler
+    // Choice index matches Roster.HEROES.
     private int player1Choice = 0;
     private int player2Choice = 1;
 
@@ -64,6 +111,10 @@ public class GameEngine {
 
     public GameState getState() {
         return state;
+    }
+
+    public InputManager getInputManager() {
+        return input;
     }
 
     // ---------------- SCREEN SWITCHING ----------------
@@ -87,6 +138,9 @@ public class GameEngine {
         // Prevent slow motion from leaking into another screen.
         timeScale = 1.0;
         lastNanos = 0;
+
+        input.setPadMenuMode(true);
+        input.setCaptureMode(false);
 
         Screen screen = screens.get(state);
         if (screen != null) {
@@ -114,7 +168,7 @@ public class GameEngine {
 
     /** True when player 2 should be controlled by the AI. */
     public boolean isVsAI() {
-        return mode == GameMode.SOLO;
+        return mode == GameMode.SOLO || mode == GameMode.ARCADE;
     }
 
     public int getArena() {
@@ -123,6 +177,48 @@ public class GameEngine {
 
     public void setArena(int arena) {
         this.arena = Math.max(0, arena);
+    }
+
+    // ---------------- ARCADE ----------------
+
+    public int getArcadeTrial() {
+        return arcadeTrial;
+    }
+
+    public void setArcadeTrial(int t) {
+        arcadeTrial = Math.max(0, Math.min(t, ARCADE_TRIALS - 1));
+    }
+
+    /** Number of trials cleared (the next one is also playable). */
+    public int getArcadeUnlocked() {
+        return progression.getArcadeCleared();
+    }
+
+    public int getArcadeOpponent(int trial) {
+        return ARCADE_OPPONENTS[Math.floorMod(trial, ARCADE_TRIALS)];
+    }
+
+    public Difficulty arcadeDifficulty(int trial) {
+        if (trial < 3)
+            return Difficulty.EASY;
+        if (trial < 7)
+            return Difficulty.MEDIUM;
+        return Difficulty.HARD;
+    }
+
+    /** Sets mode, opponent, arena and difficulty for the current trial. */
+    public void configureArcadeTrial() {
+        setMode(GameMode.ARCADE);
+        setDifficulty(arcadeDifficulty(arcadeTrial));
+        setPlayer2Choice(ARCADE_OPPONENTS[arcadeTrial]);
+        setArena(ARCADE_ARENAS[arcadeTrial]);
+    }
+
+    /** Call once when an Arcade match finishes. Awards XP and saves. */
+    public void reportArcadeResult(boolean playerWon) {
+        lastXpGained = playerWon
+                ? progression.awardArcadeWin(arcadeTrial)
+                : 0;
     }
 
     // ---------------- TIME SCALE ----------------
@@ -170,11 +266,11 @@ public class GameEngine {
     }
 
     public void setPlayer1Choice(int choice) {
-        player1Choice = Math.floorMod(choice, Roster.PLAYABLE);
+        player1Choice = Math.floorMod(choice, Roster.HEROES.length);
     }
 
     public void setPlayer2Choice(int choice) {
-        player2Choice = Math.floorMod(choice, Roster.PLAYABLE);
+        player2Choice = Math.floorMod(choice, Roster.HEROES.length);
     }
 
     public Fighter createFighter(int player, double startX) {
@@ -189,20 +285,37 @@ public class GameEngine {
                     "Player must be 1 or 2, got: " + player);
         }
 
-        if (choice == 0) {
-            return new MysticMage(player, startX);
-        }
-        if (choice == 1) {
-            return new ShadowVigilante(player, startX);
-        }
-        if (choice == 2) {
-            return new SpeedsterSonic(player, startX);
+        // Upgrades and locks apply to the human player in Arcade and Solo.
+        boolean progressionMode = (player == 1)
+                && (mode == GameMode.ARCADE || mode == GameMode.SOLO);
+
+        if (progressionMode && !isChoiceUnlocked(choice)) {
+            choice = 0; // locked fighter: fall back to the starter
+            player1Choice = 0;
         }
 
-        // Choice 3 (Plumber Brawler): enable once PlumberBrawler.java exists
-        // and Roster.PLAYABLE is 4. Until then, fall back safely.
-        // return new mystic.fighters.PlumberBrawler(player, startX);
-        return new MysticMage(player, startX);
+        Fighter f = switch (choice) {
+            case 1 -> new ShadowVigilante(player, startX);
+            case 2 -> new SpeedsterSonic(player, startX);
+            case 3 -> new PlumberBrawler(player, startX);
+            case 4 -> new FlameKarateka(player, startX);
+            case 5 -> new CyberHunter(player, startX);
+            case 6 -> new StreetStriker(player, startX);
+            case 7 -> new StarSage(player, startX);
+            case 8 -> new PhantomBlade(player, startX);
+            case 9 -> new ToxicToad(player, startX);
+            default -> new MysticMage(player, startX);
+        };
+
+        if (progressionMode) {
+            String id = fighterId(choice);
+            f.applyUpgrades(
+                    progression.getMultiplier(id, ProgressionManager.Stat.HEALTH),
+                    progression.getMultiplier(id, ProgressionManager.Stat.DAMAGE),
+                    progression.getMultiplier(id, ProgressionManager.Stat.SPEED));
+        }
+
+        return f;
     }
 
     // ---------------- GAME LOOP ----------------
@@ -236,6 +349,7 @@ public class GameEngine {
     }
 
     private void tick(double dt) {
+        input.poll();
         Screen screen = screens.get(state);
 
         // Freeze screen logic during a transition so keys can't fire twice.
@@ -261,6 +375,7 @@ public class GameEngine {
         if (gameTimer != null) {
             gameTimer.stop();
             gameTimer = null;
+            input.shutdown();
         }
 
         input.clear();

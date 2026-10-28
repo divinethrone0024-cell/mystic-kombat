@@ -1,4 +1,3 @@
-
 package mystic.fighters;
 
 import javafx.scene.canvas.GraphicsContext;
@@ -6,14 +5,17 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 
+import mystic.engine.CharacterAnimationController.Pose;
+import mystic.combat.ArcaneProjectile;
 import mystic.combat.AttackType;
 import mystic.combat.UltimateType;
 import mystic.common.Action;
 import mystic.common.Constants;
 import mystic.common.FighterState;
 import mystic.common.Rect;
+import mystic.engine.AttackEffectPlayer;
+import mystic.engine.CharacterAnimationController;
 import mystic.engine.InputManager;
-import mystic.engine.SpriteAnimation;
 
 /** Shared behaviour of every fighter. */
 public abstract class Fighter {
@@ -54,7 +56,7 @@ public abstract class Fighter {
     private static final double DODGE_SPEED = 780.0;
 
     protected final String name;
-    protected final int maxHealth;
+    protected int maxHealth;
     protected int health;
     protected final int speed;
     protected final int damage;
@@ -62,6 +64,9 @@ public abstract class Fighter {
     protected final Color color;
 
     private final double startX;
+
+    private double damageMultiplier = 1.0;
+    private double speedMultiplier = 1.0;
 
     protected double x;
     protected double y;
@@ -109,15 +114,25 @@ public abstract class Fighter {
     private double dodgeDirection = 0.0;
 
     // Optional sprite animation. Combat logic and hitboxes remain unchanged.
-    private SpriteAnimation spriteAnimation;
+    private CharacterAnimationController characterAnimation;
     private double spriteWidth = 96.0;
-    private double spriteHeight = 96.0;
+    private double spriteHeight = 120.0;
 
-    // Character-specific special-move support. Existing combat behaviour is
-    // preserved.
+    // Character-specific special-move support.
     private double specialCooldownTimer = 0.0;
     private double specialEffectTimer = 0.0;
     private boolean specialActive = false;
+
+    // Projectile created by a signature move, picked up by CombatSystem.
+    private ArcaneProjectile queuedProjectile;
+
+    // Slash / impact visual effects (purely cosmetic, no hitbox impact).
+    private final AttackEffectPlayer attackEffect = new AttackEffectPlayer();
+    private final AttackEffectPlayer specialEffect = new AttackEffectPlayer();
+    private double specialEffectX;
+    private double specialEffectY;
+    private double specialEffectSize;
+    private boolean specialEffectFlip;
 
     protected Fighter(
             String name,
@@ -137,24 +152,149 @@ public abstract class Fighter {
         this.color = color;
 
         // The mage sheet is a single row of 14 frames, each 64 x 64.
-        // Other fighters keep the existing fallback renderer until their atlas
+        // Other fighters keep the fallback renderer until their atlas
         // rows are mapped explicitly.
         if ("Mystic Mage".equals(name)) {
-            spriteAnimation = new SpriteAnimation(
-                    "/assets/characters/mage/mage_guardian-blue.png",
-                    64,
-                    64,
-                    14,
-                    10.0);
-            spriteWidth = 96.0;
-            spriteHeight = 96.0;
+            characterAnimation = new CharacterAnimationController(
+                    "/assets/characters/mage/mystic_mage_sheet.png");
+
+            spriteWidth = 105.0;
+            spriteHeight = 120.0;
+
+        } else if (getSpriteSetId() != null) {
+            // Fighters with their own sprite set (see SpriteSets.java).
+            characterAnimation = CharacterAnimationController
+                    .forSet(getSpriteSetId());
+
+            spriteWidth = getSpriteWidth();
+            spriteHeight = getSpriteHeight();
         }
 
         resetForRound();
     }
 
+    /** Applies permanent Sorcery upgrades. Call once, right after creation. */
+    public void applyUpgrades(double healthMult, double damageMult, double speedMult) {
+        this.maxHealth = Math.max(1, (int) Math.round(maxHealth * healthMult));
+        this.damageMultiplier = damageMult;
+        this.speedMultiplier = speedMult;
+        resetForRound();
+    }
+
     public UltimateType getUltimateType() {
         return UltimateType.ARCANE_CATACLYSM;
+    }
+
+    // ------------------------------------------------------------------
+    // Per-fighter identity and balance hooks. Every default reproduces the
+    // old behaviour, so existing fighters are unaffected.
+    // ------------------------------------------------------------------
+
+    /** Short class title shown on the character card. */
+    public String getTitle() {
+        return "Fighter";
+    }
+
+    /** One-line description shown on the character card. */
+    public String getLore() {
+        return "";
+    }
+
+    /** What the signature move does (character select / versus screens). */
+    public String getSpecialMoveDescription() {
+        return "";
+    }
+
+    /** Display name of the ultimate, taken from its UltimateType. */
+    public String getUltimateName() {
+        UltimateType type = getUltimateType();
+        return type == null ? "Ultimate" : type.getDisplayName();
+    }
+
+    /** Portrait used by the book and versus screens (null = none). */
+    public String getPortraitPath() {
+        return getSpriteSetId() == null
+                ? null
+                : "/assets/portraits/" + getSpriteSetId() + ".png";
+    }
+
+    /** Ki gained when this fighter deals damage (1.0 = normal). */
+    public double getKiDealtMultiplier() {
+        return 1.0;
+    }
+
+    /** Ki gained when this fighter takes damage (1.0 = normal). */
+    public double getKiTakenMultiplier() {
+        return 1.0;
+    }
+
+    /**
+     * Damage multiplier for this fighter in the given arena
+     * (0 Sanctum, 1 Crimson Mirror, 2 Blood Moon, 3 Multiverse Breakdown).
+     */
+    public double getArenaAffinity(int arenaIndex) {
+        return 1.0;
+    }
+
+    /** Colour of this fighter's normal-hit impact burst (null = default). */
+    public Color getImpactColor() {
+        return null;
+    }
+
+    /** Id of a sprite set in SpriteSets, or null to use the old renderer. */
+    protected String getSpriteSetId() {
+        return null;
+    }
+
+    protected double getSpriteWidth() {
+        return 105.0;
+    }
+
+    protected double getSpriteHeight() {
+        return 120.0;
+    }
+
+    /** True when the artwork faces left (the toad sheet does). */
+    protected boolean isSpriteFacingLeft() {
+        return false;
+    }
+
+    /**
+     * Instant melee-style hit for signature moves (kick, tongue, slash).
+     * Respects dodge, perfect guard and blocking like a normal attack.
+     * A launch velocity above zero makes it a launcher.
+     */
+    protected void strikeTarget(
+            Fighter target,
+            int dmg,
+            double stun,
+            double knockback,
+            double launch) {
+
+        dmg = (int) Math.round(dmg * damageMultiplier);
+
+        if (target == null || target.isKO() || target.canEvadeAttack()) {
+            return;
+        }
+
+        if (target.consumePerfectGuard()) {
+            staggerFromParry();
+            return;
+        }
+
+        if (target.isBlocking()) {
+            target.takeBlockedHit(Math.max(1, dmg / 4));
+            gainKi(dmg * 0.25 * getKiDealtMultiplier());
+            return;
+        }
+
+        if (launch > 0) {
+            target.takeLauncherHit(dmg, stun, knockback, launch);
+        } else {
+            target.takeHit(dmg, stun, knockback);
+        }
+
+        gainKi(dmg * 0.5 * getKiDealtMultiplier());
     }
 
     /** Reset the fighter and Ki meter for a new round. */
@@ -200,6 +340,10 @@ public abstract class Fighter {
         specialEffectTimer = 0.0;
         specialActive = false;
 
+        attackEffect.stop();
+        specialEffect.stop();
+        queuedProjectile = null;
+
         state = FighterState.IDLE;
         facingRight = startX < Constants.WIDTH / 2.0;
     }
@@ -216,7 +360,9 @@ public abstract class Fighter {
      */
     public boolean activateSpecialMove(Fighter opponent) {
         if (opponent == null || isKO() || isUltimateActive()
-                || specialCooldownTimer > 0.0 || specialActive) {
+                || specialCooldownTimer > 0.0 || specialActive
+                || hitstunTimer > 0 || currentAttack != null
+                || dashTimer > 0 || dodgeTimer > 0) {
             return false;
         }
 
@@ -240,6 +386,16 @@ public abstract class Fighter {
         return "SPECIAL MOVE";
     }
 
+    /** Display name of the light attack; subclasses may override. */
+    public String getLightAttackName() {
+        return "Light Attack";
+    }
+
+    /** Display name of the heavy attack; subclasses may override. */
+    public String getHeavyAttackName() {
+        return "Heavy Attack";
+    }
+
     /** Default cooldown in seconds; subclasses may override. */
     public double getSpecialCooldown() {
         return 3.0;
@@ -248,6 +404,42 @@ public abstract class Fighter {
     /** Default visual-active duration in seconds; subclasses may override. */
     protected double getSpecialEffectDuration() {
         return 0.35;
+    }
+
+    /** Subclasses call this to hand a projectile to the combat system. */
+    protected void queueProjectile(ArcaneProjectile projectile) {
+        queuedProjectile = projectile;
+    }
+
+    /** Returns and clears the projectile queued by a signature move. */
+    public ArcaneProjectile pollProjectile() {
+        ArcaneProjectile p = queuedProjectile;
+        queuedProjectile = null;
+        return p;
+    }
+
+    /** Hue shift (-1..1) applied to the red slash sheet. 0 keeps it red. */
+    protected double getAttackEffectHue() {
+        return 0.0;
+    }
+
+    /**
+     * Plays the big effect for a signature move at a world position.
+     * Subclasses call this from performSpecialMove.
+     */
+    protected void startSpecialEffect(
+            double worldX,
+            double worldY,
+            double size,
+            boolean flip,
+            double hue,
+            double duration) {
+
+        specialEffectX = worldX;
+        specialEffectY = worldY;
+        specialEffectSize = size;
+        specialEffectFlip = flip;
+        specialEffect.play(duration, 0.0, 0, hue);
     }
 
     public double getSpecialCooldownRemaining() {
@@ -283,9 +475,13 @@ public abstract class Fighter {
         updateHitFlash(dt);
         updateMovementAbilityTimers(dt);
         updateSpecialMoveTimers(dt);
+        attackEffect.update(dt);
+        specialEffect.update(dt);
 
-        if (spriteAnimation != null) {
-            spriteAnimation.update(dt);
+        // Advance sprite frames. If your controller names this differently
+        // (or advances frames inside draw()), adjust or remove this line.
+        if (characterAnimation != null) {
+            characterAnimation.update(dt);
         }
 
         parryFlashTimer = Math.max(0, parryFlashTimer - dt);
@@ -513,7 +709,7 @@ public abstract class Fighter {
             onGround = false;
         }
 
-        physics(dt, dir * speed * SPEED_SCALE);
+        physics(dt, dir * speed * speedMultiplier * SPEED_SCALE);
 
         // Update animation state.
         if (!onGround) {
@@ -628,6 +824,13 @@ public abstract class Fighter {
         attackTimer = 0;
         hasHit = false;
 
+        // Slash effect appears when the attack becomes active.
+        attackEffect.play(
+                Math.max(0.12, attack.total() - attack.startup),
+                attack.startup,
+                3,
+                getAttackEffectHue());
+
         if (attack == AttackType.HEAVY
                 || attack == AttackType.LAUNCHER) {
             state = FighterState.ATTACK_HEAVY;
@@ -727,7 +930,7 @@ public abstract class Fighter {
         health -= actualDamage;
 
         // Taking damage also generates Mystic Energy.
-        gainKi(actualDamage * 0.7);
+        gainKi(actualDamage * 0.7 * getKiTakenMultiplier());
 
         hitFlashTimer = HIT_FLASH_DURATION;
 
@@ -824,7 +1027,7 @@ public abstract class Fighter {
 
         health -= actualDamage;
 
-        gainKi(actualDamage * 0.7);
+        gainKi(actualDamage * 0.7 * getKiTakenMultiplier());
 
         hitstunTimer = 0;
         knockbackVx = 0;
@@ -864,6 +1067,20 @@ public abstract class Fighter {
         }
 
         ki = Math.min(MAX_KI, ki + amount);
+    }
+
+    /** Training mode helper: refill health and/or Ki and revive from KO. */
+    public void trainingRestore(boolean restoreHealth, boolean restoreKi) {
+        if (restoreHealth) {
+            health = maxHealth;
+            if (state == FighterState.KO) {
+                state = FighterState.IDLE;
+                hitstunTimer = 0;
+            }
+        }
+        if (restoreKi) {
+            ki = MAX_KI;
+        }
     }
 
     public double getKi() {
@@ -913,7 +1130,7 @@ public abstract class Fighter {
     }
 
     public int getUltimateDamage() {
-        return ULTIMATE_DAMAGE;
+        return (int) Math.round(ULTIMATE_DAMAGE * damageMultiplier);
     }
 
     public double getUltimateRange() {
@@ -992,7 +1209,44 @@ public abstract class Fighter {
         }
 
         return (int) Math.round(
-                damage * currentAttack.damageMultiplier);
+                damage * currentAttack.damageMultiplier * damageMultiplier);
+    }
+
+    /** Maps the current fighter state to a sprite pose. */
+    private Pose getCurrentSpritePose() {
+        if (isUltimateActive()) {
+            return Pose.ULTIMATE;
+        }
+
+        if (isSpecialActive()) {
+            // The mage's SPECIAL crop is very short, so it keeps the heavy
+            // pose. Fighters with their own sprite set have a real one.
+            return getSpriteSetId() != null
+                    ? Pose.SPECIAL
+                    : Pose.HEAVY_ATTACK;
+        }
+
+        switch (state) {
+            case WALK:
+            case DASHING:
+            case DODGING:
+                return Pose.WALK;
+            case JUMP:
+                return Pose.JUMP;
+            case CROUCH:
+            case BLOCKING:
+                return Pose.CROUCH;
+            case ATTACK_LIGHT:
+                return Pose.LIGHT_ATTACK;
+            case ATTACK_HEAVY:
+                return Pose.HEAVY_ATTACK;
+            case HITSTUN:
+                return Pose.HIT;
+            case KO:
+                return Pose.KO;
+            default:
+                return Pose.IDLE;
+        }
     }
 
     /** Draw the fighter and temporary visual effects. */
@@ -1065,23 +1319,26 @@ public abstract class Fighter {
             gc.setLineWidth(1);
         }
 
-        if (spriteAnimation != null) {
+        if (characterAnimation != null) {
             // x is the fighter's horizontal centre and y is the ground line.
             // Draw from the ground up so the sprite stays anchored while jumping.
             double drawX = x - spriteWidth / 2.0;
             double drawY = y - spriteHeight;
 
-            spriteAnimation.draw(
+            characterAnimation.setPose(getCurrentSpritePose());
+
+            characterAnimation.draw(
                     gc,
                     drawX,
                     drawY,
                     spriteWidth,
                     spriteHeight,
-                    !facingRight);
+                    isSpriteFacingLeft() ? facingRight : !facingRight);
 
             // Preserve the hit flash visually without changing collision data.
             if (hitFlashTimer > 0 && !blocking) {
                 gc.save();
+
                 try {
                     gc.setGlobalAlpha(0.30);
                     gc.setFill(Color.WHITE);
@@ -1091,7 +1348,7 @@ public abstract class Fighter {
                 }
             }
         } else {
-            // Existing fallback rendering for fighters without configured sprites.
+            // Fallback rendering for fighters without configured sprites.
             gc.setFill(body);
             gc.fillRect(hb.x(), hb.y(), hb.w(), hb.h());
 
@@ -1199,18 +1456,39 @@ public abstract class Fighter {
                     y - STAND_HEIGHT - 24);
         }
 
-        Rect hit = getHitbox();
+        // Slash sprite effect replaces the old yellow hitbox bar.
+        if (currentAttack != null && attackEffect.isPlaying()) {
+            double dir = facingRight ? 1.0 : -1.0;
+            boolean heavy = currentAttack == AttackType.HEAVY
+                    || currentAttack == AttackType.LAUNCHER;
 
-        if (hit != null) {
-            gc.setFill(Color.YELLOW);
-            gc.fillRect(
-                    hit.x(),
-                    hit.y(),
-                    hit.w(),
-                    hit.h());
+            attackEffect.draw(
+                    gc,
+                    x + dir * (WIDTH / 2 + 45),
+                    y - STAND_HEIGHT * 0.55,
+                    heavy ? 260 : 210,
+                    !facingRight);
+        }
+
+        // Signature move effect.
+        if (specialEffect.isPlaying()) {
+            specialEffect.draw(
+                    gc,
+                    specialEffectX,
+                    specialEffectY,
+                    specialEffectSize,
+                    specialEffectFlip);
         }
 
         if (debug) {
+            // Hitboxes are only visible in debug mode.
+            Rect hit = getHitbox();
+
+            if (hit != null) {
+                gc.setStroke(Color.YELLOW);
+                gc.strokeRect(hit.x(), hit.y(), hit.w(), hit.h());
+            }
+
             gc.setStroke(Color.LIMEGREEN);
             gc.strokeRect(
                     hb.x(),

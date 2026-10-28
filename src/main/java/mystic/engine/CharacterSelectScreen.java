@@ -9,78 +9,23 @@ import javafx.scene.text.TextAlignment;
 
 import mystic.common.Constants;
 import mystic.common.GameState;
+import mystic.common.Roster;
+import mystic.common.Roster.Hero;
 
 public class CharacterSelectScreen implements Screen {
+
+        private static final Color BACKGROUND = Color.rgb(8, 10, 23);
+        private static final Color PANEL = Color.rgb(19, 23, 43);
+        private static final Color MUTED = Color.rgb(157, 165, 190);
+        private static final Color P1 = Color.rgb(100, 210, 255);
+        private static final Color P2 = Color.rgb(255, 190, 95);
 
         private final GameEngine engine;
 
         private int p1Choice;
         private int p2Choice;
         private int choosingPlayer = 1;
-
         private double animationTime;
-
-        private static final String[] NAMES = {
-                        "MYSTIC MAGE",
-                        "SHADOW VIGILANTE",
-                        "SPEEDSTER SONIC",
-                        "PLUMBER BRAWLER"
-        };
-
-        private static final String[] TITLES = {
-                        "MASTER OF THE ARCANE",
-                        "THE SILENT EXECUTIONER",
-                        "THE LIGHTNING FIGHTER",
-                        "THE HEAVY HITTER"
-        };
-
-        private static final String[] DESCRIPTIONS = {
-                        "Wields ancient magic in battle.",
-                        "A relentless close-range warrior.",
-                        "Uses speed and dash attacks.",
-                        "Uses powerful, heavy strikes."
-        };
-
-        private static final String[] SPECIALS = {
-                        "ARCANE BLAST",
-                        "SHADOW STRIKE",
-                        "LIGHTNING RUSH",
-                        "POWER SMASH"
-        };
-
-        private static final String[] ULTIMATES = {
-                        "MYSTIC NOVA",
-                        "ETERNAL NIGHT",
-                        "SONIC OVERDRIVE",
-                        "TITAN IMPACT"
-        };
-
-        private static final int[] HEALTH = {
-                        100, 120, 95, 130
-        };
-
-        private static final int[] SPEED = {
-                        5, 4, 7, 3
-        };
-
-        private static final int[] DAMAGE = {
-                        12, 15, 10, 17
-        };
-
-        private static final Color[] COLORS = {
-                        Color.rgb(176, 108, 255),
-                        Color.rgb(255, 75, 85),
-                        Color.rgb(50, 205, 255),
-                        Color.rgb(255, 180, 65)
-        };
-
-        private static final Color BACKGROUND = Color.rgb(8, 10, 23);
-
-        private static final Color PANEL = Color.rgb(19, 23, 43);
-
-        private static final Color MUTED = Color.rgb(157, 165, 190);
-
-        private static final int CHARACTER_COUNT = NAMES.length;
 
         public CharacterSelectScreen(GameEngine engine) {
                 this.engine = engine;
@@ -88,14 +33,28 @@ public class CharacterSelectScreen implements Screen {
 
         @Override
         public void onEnter() {
-                p1Choice = Math.floorMod(
-                                engine.getPlayer1Choice(), CHARACTER_COUNT);
+                int n = Roster.HEROES.length;
 
-                p2Choice = Math.floorMod(
-                                engine.getPlayer2Choice(), CHARACTER_COUNT);
+                p1Choice = Math.floorMod(engine.getPlayer1Choice(), n);
+                p2Choice = Math.floorMod(engine.getPlayer2Choice(), n);
+
+                // Keep the selected characters valid if a previously selected
+                // character is now locked.
+                if (!isUnlocked(p1Choice)) {
+                        p1Choice = ProgressionManager.STARTER_CHARACTER;
+                }
+
+                if (!isUnlocked(p2Choice)) {
+                        p2Choice = ProgressionManager.STARTER_CHARACTER;
+                }
 
                 choosingPlayer = 1;
                 animationTime = 0;
+        }
+
+        private boolean isUnlocked(int index) {
+                return Roster.isPlayable(index)
+                                && engine.getProgression().isCharacterUnlocked(index);
         }
 
         @Override
@@ -104,6 +63,12 @@ public class CharacterSelectScreen implements Screen {
 
                 if (input.wasPressed(KeyCode.ESCAPE)) {
                         engine.changeState(GameState.MENU);
+                        return;
+                }
+
+                // Open Sorcery Upgradation.
+                if (input.wasPressed(KeyCode.U)) {
+                        engine.changeState(GameState.SORCERY_UPGRADATION);
                         return;
                 }
 
@@ -124,6 +89,15 @@ public class CharacterSelectScreen implements Screen {
                 if (input.wasPressed(KeyCode.ENTER)
                                 || input.wasPressed(KeyCode.SPACE)) {
 
+                        int current = choosingPlayer == 1
+                                        ? p1Choice
+                                        : p2Choice;
+
+                        // Never allow a locked character to be confirmed.
+                        if (!isUnlocked(current)) {
+                                return;
+                        }
+
                         if (choosingPlayer == 1) {
                                 engine.setPlayer1Choice(p1Choice);
                                 choosingPlayer = 2;
@@ -134,13 +108,26 @@ public class CharacterSelectScreen implements Screen {
                 }
         }
 
+        /** Moves the cursor only to unlocked, playable characters. */
         private void changeChoice(int direction) {
+                int n = Roster.HEROES.length;
+
+                int current = choosingPlayer == 1
+                                ? p1Choice
+                                : p2Choice;
+
+                for (int step = 0; step < n; step++) {
+                        current = Math.floorMod(current + direction, n);
+
+                        if (isUnlocked(current)) {
+                                break;
+                        }
+                }
+
                 if (choosingPlayer == 1) {
-                        p1Choice = Math.floorMod(
-                                        p1Choice + direction, CHARACTER_COUNT);
+                        p1Choice = current;
                 } else {
-                        p2Choice = Math.floorMod(
-                                        p2Choice + direction, CHARACTER_COUNT);
+                        p2Choice = current;
                 }
         }
 
@@ -152,7 +139,6 @@ public class CharacterSelectScreen implements Screen {
                 drawBackground(gc, w, h);
 
                 gc.setTextAlign(TextAlignment.CENTER);
-
                 gc.setFill(Color.rgb(244, 218, 157));
                 gc.setFont(Font.font("Serif", 13));
                 gc.fillText(
@@ -171,39 +157,53 @@ public class CharacterSelectScreen implements Screen {
                                                 : "PLAYER 2 — SELECT YOUR CHAMPION",
                                 w / 2, 88);
 
-                double marginX = Math.max(24, w * 0.07);
-                double gapX = 18;
-                double gapY = 12;
+                // Roster strip.
+                int n = Roster.HEROES.length;
+                double margin = Math.max(24, w * 0.05);
+                double gap = 8;
+                double tileW = (w - 2 * margin - (n - 1) * gap) / n;
+                double tileH = 58;
+                double stripY = 105;
 
-                double cardWidth = (w - 2 * marginX - gapX) / 2.0;
-                double cardHeight = (h - 145 - 70 - gapY) / 2.0;
-
-                double topY = 105;
-                double bottomY = topY + cardHeight + gapY;
-
-                double leftX = marginX;
-                double rightX = marginX + cardWidth + gapX;
-
-                // Draw all four selectable fighters.
-                for (int i = 0; i < CHARACTER_COUNT; i++) {
-                        double x = (i % 2 == 0) ? leftX : rightX;
-                        double y = (i < 2) ? topY : bottomY;
-
-                        drawFighterCard(
-                                        gc, x, y, cardWidth, cardHeight, i);
+                for (int i = 0; i < n; i++) {
+                        drawTile(
+                                        gc,
+                                        margin + i * (tileW + gap),
+                                        stripY,
+                                        tileW,
+                                        tileH,
+                                        i);
                 }
 
-                // Instructions footer.
-                gc.setFill(Color.rgb(10, 12, 25, 0.97));
-                gc.fillRoundRect(
-                                18, h - 53, w - 36, 40, 12, 12);
+                // Selected character details.
+                int current = choosingPlayer == 1
+                                ? p1Choice
+                                : p2Choice;
 
+                double cardY = stripY + tileH + 16;
+                double cardH = h - cardY - 66;
+
+                drawDetail(
+                                gc,
+                                margin,
+                                cardY,
+                                w - 2 * margin,
+                                cardH,
+                                current);
+
+                // Footer.
+                gc.setFill(Color.rgb(10, 12, 25, 0.97));
+                gc.fillRoundRect(18, h - 53, w - 36, 40, 12, 12);
+
+                gc.setTextAlign(TextAlignment.CENTER);
                 gc.setFill(Color.WHITE);
-                gc.setFont(Font.font("Arial", 11));
+                gc.setFont(Font.font("Arial", 10));
+
                 gc.fillText(
-                                "A / D OR ARROWS: CHANGE FIGHTER"
-                                                + "     •     ENTER: CONFIRM"
-                                                + "     •     ESC: BACK",
+                                "A / D OR ARROWS: CHANGE"
+                                                + "  •  ENTER: CONFIRM"
+                                                + "  •  U: SORCERY UPGRADATION"
+                                                + "  •  ESC: BACK",
                                 w / 2, h - 36);
 
                 gc.setFill(Color.GOLD);
@@ -218,12 +218,12 @@ public class CharacterSelectScreen implements Screen {
         }
 
         private void drawBackground(
-                        GraphicsContext gc, double w, double h) {
-
+                        GraphicsContext gc,
+                        double w,
+                        double h) {
                 gc.setFill(BACKGROUND);
                 gc.fillRect(0, 0, w, h);
 
-                // Subtle vertical light beams.
                 for (int i = 0; i < 9; i++) {
                         double x = i * w / 8.0;
 
@@ -232,7 +232,6 @@ public class CharacterSelectScreen implements Screen {
                         gc.strokeLine(x, 0, x - 120, h);
                 }
 
-                // Moving multiverse particles.
                 for (int i = 0; i < 35; i++) {
                         double x = Math.floorMod(i * 137, (int) w);
                         double baseY = Math.floorMod(i * 83, (int) h);
@@ -244,166 +243,192 @@ public class CharacterSelectScreen implements Screen {
                         gc.setFill(Color.rgb(171, 143, 255, 0.3));
                         gc.fillOval(x, y, 2 + i % 3, 2 + i % 3);
                 }
-
-                gc.setLineWidth(1);
         }
 
-        private void drawFighterCard(
+        private void drawTile(
                         GraphicsContext gc,
                         double x,
                         double y,
-                        double width,
-                        double height,
-                        int index) {
+                        double w,
+                        double h,
+                        int i) {
+                Hero hero = Roster.HEROES[i];
+                Color color = hero.color();
 
-                Color accent = COLORS[index];
-
-                boolean selectedByP1 = p1Choice == index;
-                boolean selectedByP2 = p2Choice == index;
+                boolean locked = !isUnlocked(i);
+                boolean by1 = p1Choice == i;
+                boolean by2 = p2Choice == i;
 
                 boolean active = choosingPlayer == 1
-                                ? selectedByP1
-                                : selectedByP2;
+                                ? by1
+                                : by2;
 
-                gc.setFill(Color.rgb(0, 0, 0, 0.25));
-                gc.fillRoundRect(
-                                x + 4, y + 5, width, height, 18, 18);
-
+                // Tile background and border.
                 gc.setFill(PANEL);
-                gc.fillRoundRect(x, y, width, height, 18, 18);
+                gc.fillRoundRect(x, y, w, h, 12, 12);
 
                 gc.setStroke(active
-                                ? accent
+                                ? color
                                 : Color.rgb(65, 73, 105));
 
                 gc.setLineWidth(active ? 3 : 1);
-                gc.strokeRoundRect(x, y, width, height, 18, 18);
+                gc.strokeRoundRect(x, y, w, h, 12, 12);
                 gc.setLineWidth(1);
 
-                // Accent strip.
-                gc.setFill(accent);
-                gc.fillRoundRect(
-                                x + 2, y + 2, width - 4, 4, 4, 4);
+                // Character emblem.
+                double d = Math.min(w * 0.6, h * 0.55);
 
+                gc.setFill(Color.color(
+                                color.getRed(),
+                                color.getGreen(),
+                                color.getBlue(),
+                                locked ? 0.25 : 0.95));
+
+                gc.fillOval(
+                                x + w / 2 - d / 2,
+                                y + 6,
+                                d,
+                                d);
+
+                // Character number.
                 gc.setTextAlign(TextAlignment.CENTER);
+                gc.setFont(Font.font("Arial", 9));
+                gc.setFill(locked ? MUTED : Color.WHITE);
 
-                // Show which players have selected this character.
-                gc.setFont(Font.font("Arial", 10));
+                gc.fillText(
+                                String.valueOf(i + 1),
+                                x + w / 2,
+                                y + h - 6);
 
-                if (selectedByP1) {
-                        gc.setFill(Color.rgb(100, 210, 255));
-                        gc.fillText("P1", x + 25, y + 22);
+                // Dark overlay for locked characters.
+                if (locked) {
+                        gc.setFill(Color.rgb(5, 7, 16, 0.78));
+
+                        gc.fillRoundRect(
+                                        x + 2,
+                                        y + 2,
+                                        w - 4,
+                                        h - 4,
+                                        10,
+                                        10);
+
+                        gc.setFill(Color.GOLD);
+                        gc.setFont(Font.font("Arial", 9));
+
+                        gc.fillText(
+                                        "LOCKED",
+                                        x + w / 2,
+                                        y + h / 2 + 3);
                 }
 
-                if (selectedByP2) {
-                        gc.setFill(Color.rgb(255, 190, 95));
-                        gc.fillText("P2", x + width - 25, y + 22);
+                // Player markers.
+                if (by1) {
+                        gc.setFill(P1);
+                        gc.setFont(Font.font("Arial", 9));
+                        gc.fillText("P1", x + 12, y + 12);
                 }
 
-                double centerX = x + width / 2;
-                double artY = y + 22;
-                double artHeight = Math.min(60, height * 0.30);
+                if (by2) {
+                        gc.setFill(P2);
+                        gc.setFont(Font.font("Arial", 9));
+                        gc.fillText("P2", x + w - 12, y + 12);
+                }
+        }
 
-                double pulse = 1.0
-                                + Math.sin(animationTime * 2.5 + index) * 0.04;
+        private void drawDetail(
+                        GraphicsContext gc,
+                        double x,
+                        double y,
+                        double w,
+                        double h,
+                        int idx) {
+                Hero hero = Roster.HEROES[idx];
+                Color color = hero.color();
 
-                double aura = artHeight * 0.95 * pulse;
+                boolean locked = !isUnlocked(idx);
+                double pulse = 1.0 + Math.sin(animationTime * 2.5) * 0.04;
 
-                // Glowing placeholder portrait.
-                // Real character sprites can be drawn here later.
-                gc.setFill(Color.color(
-                                accent.getRed(),
-                                accent.getGreen(),
-                                accent.getBlue(),
-                                active ? 0.20 : 0.09));
+                gc.setFill(PANEL);
+                gc.fillRoundRect(x, y, w, h, 18, 18);
 
-                gc.fillOval(
-                                centerX - aura / 2,
-                                artY,
-                                aura,
-                                aura);
-
-                gc.setFill(Color.color(
-                                accent.getRed(),
-                                accent.getGreen(),
-                                accent.getBlue(),
-                                0.95));
-
-                double headSize = Math.min(31, artHeight * 0.48);
-
-                gc.fillOval(
-                                centerX - headSize / 2,
-                                artY + 5,
-                                headSize,
-                                headSize);
-
-                double bodyWidth = Math.min(54, width * 0.25);
-
-                gc.fillRoundRect(
-                                centerX - bodyWidth / 2,
-                                artY + headSize + 6,
-                                bodyWidth,
-                                Math.max(14, artHeight * 0.35),
-                                12, 12);
-
-                gc.setStroke(Color.rgb(255, 255, 255, 0.75));
+                gc.setStroke(color);
                 gc.setLineWidth(2);
-
-                gc.strokeLine(
-                                centerX - 9, artY + 17,
-                                centerX + 9, artY + 17);
-
+                gc.strokeRoundRect(x, y, w, h, 18, 18);
                 gc.setLineWidth(1);
 
-                double textY = artY + artHeight + 15;
+                gc.setFill(color);
+                gc.fillRoundRect(x + 2, y + 2, w - 4, 4, 4, 4);
 
-                gc.setFill(Color.WHITE);
-                gc.setFont(Font.font(
-                                "Serif", width < 300 ? 15 : 19));
+                // Glowing emblem.
+                double ex = x + w * 0.2;
+                double ey = y + h * 0.45;
+                double r = Math.min(w * 0.12, h * 0.3) * pulse;
 
-                gc.fillText(NAMES[index], centerX, textY);
+                gc.setFill(Color.color(
+                                color.getRed(),
+                                color.getGreen(),
+                                color.getBlue(),
+                                0.2));
 
-                gc.setFill(accent);
-                gc.setFont(Font.font("Arial", 9));
-                gc.fillText(TITLES[index], centerX, textY + 16);
+                gc.fillOval(
+                                ex - r * 1.4,
+                                ey - r * 1.4,
+                                r * 2.8,
+                                r * 2.8);
 
-                gc.setFill(MUTED);
-                gc.setFont(Font.font("Arial", 10));
-                gc.fillText(DESCRIPTIONS[index], centerX, textY + 31);
+                gc.setFill(Color.color(
+                                color.getRed(),
+                                color.getGreen(),
+                                color.getBlue(),
+                                locked ? 0.25 : 0.95));
 
-                double statsY = textY + 48;
+                gc.fillOval(ex - r, ey - r, r * 2, r * 2);
 
-                drawStat(
-                                gc, x + 16, statsY, width - 32,
-                                "HP", HEALTH[index] / 130.0, accent);
-
-                drawStat(
-                                gc, x + 16, statsY + 16, width - 32,
-                                "SPD", SPEED[index] / 7.0, accent);
-
-                drawStat(
-                                gc, x + 16, statsY + 32, width - 32,
-                                "DMG", DAMAGE[index] / 17.0, accent);
-
-                double abilityY = statsY + 51;
-
-                gc.setFill(MUTED);
-                gc.setFont(Font.font("Arial", 9));
-                gc.fillText(
-                                SPECIALS[index] + "  •  " + ULTIMATES[index],
-                                centerX, abilityY);
-
-                if (active) {
-                        gc.setFill(accent);
-                        gc.setFont(Font.font("Arial", 9));
-                        gc.fillText(
-                                        choosingPlayer == 1
-                                                        ? "PLAYER 1 — CURRENT SELECTION"
-                                                        : "PLAYER 2 — CURRENT SELECTION",
-                                        centerX, y + height - 9);
-                }
+                // Character information.
+                double tx = x + w * 0.42;
 
                 gc.setTextAlign(TextAlignment.LEFT);
+                gc.setFill(Color.WHITE);
+                gc.setFont(Font.font("Serif", 26));
+                gc.fillText(hero.name(), tx, y + 40);
+
+                gc.setFill(color);
+                gc.setFont(Font.font("Arial", 12));
+                gc.fillText(
+                                hero.title().toUpperCase(),
+                                tx,
+                                y + 60);
+
+                gc.setFill(MUTED);
+                gc.setFont(Font.font("Arial", 11));
+
+                double ly = y + 86;
+
+                for (String power : hero.powers()) {
+                        gc.fillText("•  " + power, tx, ly);
+                        ly += 17;
+                }
+
+                double sy = Math.max(ly + 14, y + h - 62);
+                double sw = w - (tx - x) - 24;
+
+                drawStat(gc, tx, sy, sw, "HP", hero.health(), color);
+                drawStat(gc, tx, sy + 18, sw, "SPD", hero.speed(), color);
+                drawStat(gc, tx, sy + 36, sw, "DMG", hero.damage(), color);
+
+                // Ownership status.
+                gc.setFont(Font.font("Arial", 12));
+
+                if (locked) {
+                        gc.setFill(Color.GOLD);
+                        gc.fillText(
+                                        "LOCKED — Visit Sorcery Upgradation (U) to unlock this fighter.",
+                                        tx,
+                                        y + h - 8);
+                } else {
+                        gc.setFill(Color.LIGHTGREEN);
+                        gc.fillText("UNLOCKED", tx, y + h - 8);
+                }
         }
 
         private void drawStat(
@@ -412,30 +437,32 @@ public class CharacterSelectScreen implements Screen {
                         double y,
                         double width,
                         String label,
-                        double value,
+                        int value,
                         Color accent) {
-
+                gc.setTextAlign(TextAlignment.LEFT);
                 gc.setFill(MUTED);
-                gc.setFont(Font.font("Arial", 9));
+                gc.setFont(Font.font("Arial", 10));
                 gc.fillText(label, x, y);
 
-                double barX = x + 36;
-                double barWidth = Math.max(10, width - 66);
+                double barX = x + 40;
+                double barW = Math.max(10, width - 80);
 
                 gc.setFill(Color.rgb(42, 47, 70));
-                gc.fillRoundRect(
-                                barX, y - 7, barWidth, 5, 5, 5);
+                gc.fillRoundRect(barX, y - 8, barW, 6, 6, 6);
 
                 gc.setFill(accent);
                 gc.fillRoundRect(
-                                barX, y - 7,
-                                barWidth * Math.max(0, Math.min(1, value)),
-                                5, 5, 5);
+                                barX,
+                                y - 8,
+                                barW * Math.max(0, Math.min(1, value / 10.0)),
+                                6,
+                                6,
+                                6);
 
                 gc.setFill(Color.WHITE);
-                gc.setFont(Font.font("Arial", 9));
                 gc.fillText(
-                                String.valueOf((int) Math.round(value * 100)),
-                                x + width, y);
+                                value + " / 10",
+                                x + 40 + barW + 8,
+                                y);
         }
 }

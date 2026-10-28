@@ -1,4 +1,3 @@
-
 package mystic.engine;
 
 import javafx.scene.canvas.GraphicsContext;
@@ -13,7 +12,7 @@ import mystic.common.GameState;
 import mystic.combat.CombatSystem;
 import mystic.combat.UltimateEffect;
 import mystic.fighters.Fighter;
-
+import mystic.common.GameMode;
 public class CombatScreen implements Screen {
 
         private final GameEngine engine;
@@ -26,9 +25,14 @@ public class CombatScreen implements Screen {
         private Fighter p1;
         private Fighter p2;
 
+        private FighterAI fighterAI;
+        private FighterAI.Decision currentAIDecision = FighterAI.Decision.APPROACH;
+
         private double timeRemaining;
         private boolean roundOver;
         private String roundMessage = "";
+
+        private double arenaTime;
 
         private int p1RoundsWon;
         private int p2RoundsWon;
@@ -46,6 +50,10 @@ public class CombatScreen implements Screen {
         private static final double ROUND_INTRO_DURATION = 2.2;
         private static final double FIGHT_ANNOUNCEMENT_TIME = 1.2;
         private double roundIntroTimer;
+        
+
+        private boolean arcadeRewardGranted;  
+
 
         // Ultimate cinematic settings.
         private static final double ULTIMATE_CINEMATIC_DURATION = 1.25;
@@ -69,6 +77,11 @@ public class CombatScreen implements Screen {
                 paused = false;
                 pauseMenu.reset();
 
+                arcadeRewardGranted = false;
+
+                pauseMenu.bind(engine.getInputManager());
+                engine.getInputManager().setPadMenuMode(false);
+
                 p1RoundsWon = 0;
                 p2RoundsWon = 0;
 
@@ -81,6 +94,21 @@ public class CombatScreen implements Screen {
                 p2 = engine.createFighter(
                                 2,
                                 Constants.WIDTH * 0.75);
+
+                // Initialize AI for Player 2 in Solo mode only.
+                if (engine.isVsAI()) {
+                        fighterAI = new FighterAI(
+                                        mapDifficulty(engine.getDifficulty()));
+                } else {
+                        fighterAI = null;
+                }
+
+                currentAIDecision = FighterAI.Decision.APPROACH;
+
+                // Clear any leftover virtual inputs from the previous match.
+                if (engine.getInputManager() != null) {
+                        engine.getInputManager().clearVirtual(2);
+                }
 
                 p1DisplayedHealth = p1.getHealth();
                 p2DisplayedHealth = p2.getHealth();
@@ -103,6 +131,7 @@ public class CombatScreen implements Screen {
                 p1.resetForRound();
                 p2.resetForRound();
 
+                // Also clears any projectiles still in flight.
                 combat.resetCombos();
                 combat.resetEffects();
 
@@ -135,6 +164,9 @@ public class CombatScreen implements Screen {
                                 0,
                                 Math.min(dt, 0.05));
 
+                arenaTime += safeDt;
+                input.setPadMenuMode(paused || roundOver);
+
                 // Handle pause input before gameplay timers or fighters update.
                 if (paused) {
                         PauseMenuScreen.Choice choice = pauseMenu.update(input);
@@ -142,6 +174,10 @@ public class CombatScreen implements Screen {
                         if (choice == PauseMenuScreen.Choice.RESUME) {
                                 paused = false;
                         } else if (choice == PauseMenuScreen.Choice.RESTART_ROUND) {
+                                startRound();
+                        } else if (choice == PauseMenuScreen.Choice.RESTART_MATCH) {
+                                p1RoundsWon = 0;
+                                p2RoundsWon = 0;
                                 startRound();
                         } else if (choice == PauseMenuScreen.Choice.MAIN_MENU) {
                                 paused = false;
@@ -205,7 +241,22 @@ public class CombatScreen implements Screen {
                         }
                 }
 
+                // Signature moves: each fighter class defines its own.
+                if (input.wasPressed(1, Action.SPECIAL)) {
+                        combat.activateSpecial(p1, p2);
+                }
+
+                if (input.wasPressed(2, Action.SPECIAL)) {
+                        combat.activateSpecial(p2, p1);
+                }
+
                 // Update fighters using the existing Fighter API.
+                if (engine.isVsAI()) {
+                        updateAI(safeDt, input);
+                } else {
+                        input.clearVirtual(2);
+                }
+
                 p1.update(safeDt, input, p2);
                 p2.update(safeDt, input, p1);
 
@@ -214,6 +265,7 @@ public class CombatScreen implements Screen {
                 int p2HealthBefore = p2.getHealth();
                 combat.resolve(p1, p2);
                 combat.resolve(p2, p1);
+                combat.updateProjectiles(safeDt, p1, p2);
                 if (p1.getHealth() < p1HealthBefore || p2.getHealth() < p2HealthBefore) {
                         SoundManager.play(SoundManager.Sound.HIT);
                 }
@@ -332,8 +384,12 @@ public class CombatScreen implements Screen {
                 }
 
                 // A best-of-three match ends when either player wins two rounds.
+                
+                // A best-of-three match ends when either player wins two rounds.
                 if (p1RoundsWon >= 2 || p2RoundsWon >= 2) {
-                        String matchWinner = p1RoundsWon > p2RoundsWon
+                        boolean player1Won = p1RoundsWon > p2RoundsWon;
+
+                        String matchWinner = player1Won
                                         ? p1.getName() + " WINS!"
                                         : p2.getName() + " WINS!";
 
@@ -342,8 +398,25 @@ public class CombatScreen implements Screen {
                                         p1RoundsWon,
                                         p2RoundsWon);
 
-                        roundMessage = matchWinner;
+                        // Award Arcade progression only once per completed match.
+                        if (engine.getMode() == GameMode.ARCADE
+                                        && !arcadeRewardGranted) {
+
+                                arcadeRewardGranted = true;
+
+                                if (player1Won) {
+                                        engine.reportArcadeResult(true);
+                                        roundMessage = matchWinner + "  |  +"
+                                                        + engine.getLastXpGained() + " XP";
+                                } else {
+                                        engine.reportArcadeResult(false);
+                                        roundMessage = matchWinner;
+                                }
+                        } else {
+                                roundMessage = matchWinner;
+                        }
                 }
+
         }
 
         @Override
@@ -369,6 +442,7 @@ public class CombatScreen implements Screen {
                                 p2.render(gc, false);
                         }
 
+                        // Projectiles and impact effects.
                         if (combat != null) {
                                 combat.renderEffects(gc);
                         }
@@ -404,27 +478,23 @@ public class CombatScreen implements Screen {
         }
 
         /**
-         * Draw the animated Mystic Kombat arena. The renderer owns the
-         * arena's layered background, glowing runes, floor details and
-         * ambient particles. Keeping this call separate from the fighter
-         * render transform means screen shake affects the combatants and
-         * combat effects without making the HUD jump around.
+         * Draw the animated Mystic Kombat arena. Keeping this call separate
+         * from the fighter render transform means screen shake affects the
+         * combatants and combat effects without making the HUD jump around.
          */
         private void drawArena(GraphicsContext gc) {
-                // Render the arena selected in ArenaSelectScreen. The renderer's
-                // floor line uses the same baseline as fighter physics.
-                double cameraX = 0;
-                if (p1 != null && p2 != null) {
-                        cameraX = (p1.getX() + p2.getX()) / 2.0 - Constants.WIDTH / 2.0;
-                }
+                // Floor horizon sits a bit above the fighters' feet so they stand ON the floor.
+                double floorY = Constants.GROUND_Y - Constants.HEIGHT * 0.07;
 
-                arenaRenderer.draw(
+                ArenaSelectScreen.drawArena(
                                 gc,
+                                engine.getArena(),
+                                0,
+                                0,
                                 Constants.WIDTH,
                                 Constants.HEIGHT,
-                                engine.getArena(),
-                                Constants.GROUND_Y,
-                                cameraX);
+                                arenaTime,
+                                floorY);
         }
 
         private void drawHUD(GraphicsContext gc) {
@@ -540,6 +610,10 @@ public class CombatScreen implements Screen {
                                         151,
                                         true);
                 }
+
+                // Signature move name, key and cooldown.
+                drawSpecialLabel(gc, p1, 1, 40, 172, false);
+                drawSpecialLabel(gc, p2, 2, width - 40, 172, true);
         }
 
         private void drawHealthBar(
@@ -820,9 +894,11 @@ public class CombatScreen implements Screen {
                                                 ? TextAlignment.RIGHT
                                                 : TextAlignment.LEFT);
 
-                String controls = rightAligned
-                                ? "ULTIMATE [;]  |  BLOCK [.]"
-                                : "ULTIMATE [H]  |  BLOCK [Q]";
+                int pl = (fighter == p1) ? 1 : 2;
+                InputManager in = engine.getInputManager();
+
+                String controls = "ULTIMATE [" + in.label(pl, Action.ULTIMATE)
+                                + "]  |  BLOCK [" + in.label(pl, Action.BLOCK) + "]";
 
                 if (ready) {
                         double pulse = 0.65 + 0.35
@@ -841,6 +917,42 @@ public class CombatScreen implements Screen {
                                         controls,
                                         x,
                                         y);
+                }
+        }
+
+        /**
+         * Shows the fighter's signature move, its key, and the cooldown.
+         */
+        private void drawSpecialLabel(
+                        GraphicsContext gc,
+                        Fighter fighter,
+                        int player,
+                        double x,
+                        double y,
+                        boolean rightAligned) {
+
+                InputManager in = engine.getInputManager();
+                double cooldown = fighter.getSpecialCooldownRemaining();
+
+                gc.setFont(Font.font("Arial", 12));
+
+                gc.setTextAlign(
+                                rightAligned
+                                                ? TextAlignment.RIGHT
+                                                : TextAlignment.LEFT);
+
+                String text = fighter.getSpecialMoveName()
+                                + " [" + in.label(player, Action.SPECIAL) + "]";
+
+                if (cooldown > 0) {
+                        gc.setFill(Color.rgb(175, 185, 210));
+                        gc.fillText(
+                                        text + "  " + String.format("%.1fs", cooldown),
+                                        x,
+                                        y);
+                } else {
+                        gc.setFill(Color.rgb(190, 150, 255));
+                        gc.fillText(text + "  READY", x, y);
                 }
         }
 
@@ -1110,6 +1222,80 @@ public class CombatScreen implements Screen {
                 return Math.max(
                                 min,
                                 Math.min(max, value));
+        }
+
+        private FighterAI.Difficulty mapDifficulty(
+                        mystic.ai.Difficulty difficulty) {
+
+                if (difficulty == null) {
+                        return FighterAI.Difficulty.MEDIUM;
+                }
+
+                return switch (difficulty.name().toUpperCase()) {
+                        case "EASY" -> FighterAI.Difficulty.EASY;
+                        case "HARD" -> FighterAI.Difficulty.HARD;
+                        default -> FighterAI.Difficulty.MEDIUM;
+                };
+        }
+
+        private void updateAI(double dt, InputManager input) {
+                if (!engine.isVsAI() || fighterAI == null || p1 == null || p2 == null) {
+                        input.clearVirtual(2);
+                        return;
+                }
+
+                FighterAI.Decision next = fighterAI.update(dt, p2, p1);
+
+                // WAIT means keep the previous decision until the next AI decision.
+                if (next != FighterAI.Decision.WAIT) {
+                        currentAIDecision = next;
+                }
+
+                // Start with no held AI actions, then apply the current decision.
+                // Re-pressing an attack is supported by the virtual input edge tracking.
+                applyAIDecision(input, currentAIDecision);
+        }
+
+        private void applyAIDecision(
+                        InputManager input,
+                        FighterAI.Decision decision) {
+
+                input.clearVirtual(2);
+
+                boolean botIsLeft = p2.getX() < p1.getX();
+
+                switch (decision) {
+                        case APPROACH -> {
+                                input.setVirtualDown(2,
+                                                botIsLeft ? Action.RIGHT : Action.LEFT, true);
+                        }
+                        case RETREAT -> {
+                                input.setVirtualDown(2,
+                                                botIsLeft ? Action.LEFT : Action.RIGHT, true);
+                        }
+                        case LIGHT_ATTACK ->
+                                input.setVirtualDown(2, Action.LIGHT, true);
+                        case HEAVY_ATTACK ->
+                                input.setVirtualDown(2, Action.HEAVY, true);
+                        case LAUNCHER ->
+                                input.setVirtualDown(2, Action.LAUNCHER, true);
+                        case BLOCK ->
+                                input.setVirtualDown(2, Action.BLOCK, true);
+                        case DODGE ->
+                                input.setVirtualDown(2, Action.DODGE, true);
+                        case DASH -> {
+                                input.setVirtualDown(2,
+                                                botIsLeft ? Action.RIGHT : Action.LEFT, true);
+                                input.setVirtualDown(2, Action.DASH, true);
+                        }
+                        case CROUCH ->
+                                input.setVirtualDown(2, Action.CROUCH, true);
+                        case ULTIMATE ->
+                                input.setVirtualDown(2, Action.ULTIMATE, true);
+                        case WAIT -> {
+                                // No action.
+                        }
+                }
         }
 
         // Animated ROUND / GET READY / FIGHT! overlay.

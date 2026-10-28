@@ -58,10 +58,13 @@ public final class MysticArenaRenderer {
         try {
             gc.setGlobalAlpha(1);
             drawFarLayer(gc, w, h, arena, cameraX);
+            drawCinematicBeams(gc, w, h, arena, cameraX);
             drawArchitecture(gc, w, h, arena, cameraX);
             drawNearLayer(gc, w, h, arena, cameraX);
             drawGameplayFloor(gc, w, h, floor, arena);
+            drawArenaHighlights(gc, w, h, floor, arena);
             drawAtmosphere(gc, w, h, floor, arena);
+            drawCinematicForeground(gc, w, h, floor, arena);
             // Shared Mystic Kombat identity: a restrained crimson wash with molten-gold
             // light.
             gc.setFill(new RadialGradient(0, 0, w * (0.48 + 0.025 * Math.sin(time * 0.7)),
@@ -370,7 +373,170 @@ public final class MysticArenaRenderer {
             gc.fillOval(w * 0.34, floor - 24, w * 0.32, 50);
         }
     }
+    
+    private void drawCinematicBeams(
+            GraphicsContext gc, double w, double h,
+            int arena, double cameraX) {
 
+        gc.save();
+        try {
+            // Moving beams add depth without covering the fighters.
+            Color beam = switch (arena) {
+                case 0 -> Color.rgb(255, 174, 75, 0.075);
+                case 1 -> Color.rgb(255, 75, 90, 0.065);
+                case 2 -> Color.rgb(100, 175, 255, 0.065);
+                default -> Color.rgb(176, 110, 255, 0.075);
+            };
+
+            gc.setFill(beam);
+
+            for (int i = 0; i < 5; i++) {
+                double x = w * (0.10 + i * 0.20)
+                        + Math.sin(time * 0.28 + i * 1.7) * w * 0.025
+                        - cameraX * 0.02;
+
+                double width = w * 0.045;
+                double bottomX = x + Math.sin(time * 0.18 + i) * w * 0.07;
+
+                gc.fillPolygon(
+                        new double[] {
+                                x - width * 0.12,
+                                x + width * 0.12,
+                                bottomX + width,
+                                bottomX - width
+                        },
+                        new double[] {
+                                0,
+                                0,
+                                h * 0.76,
+                                h * 0.76
+                        },
+                        4);
+            }
+
+            // Central backlight; its colour identifies the arena.
+            Color core = switch (arena) {
+                case 0 -> Color.rgb(255, 118, 42, 0.12);
+                case 1 -> Color.rgb(255, 55, 75, 0.10);
+                case 2 -> Color.rgb(70, 155, 255, 0.10);
+                default -> Color.rgb(155, 80, 255, 0.13);
+            };
+
+            double pulse = 0.90 + 0.10 * Math.sin(time * 1.8);
+            double cx = w * 0.5 - cameraX * 0.025;
+            double cy = h * 0.40;
+
+            gc.setFill(new RadialGradient(
+                    0, 0, cx, cy, w * 0.42 * pulse,
+                    false, CycleMethod.NO_CYCLE,
+                    new Stop(0, core),
+                    new Stop(1, Color.TRANSPARENT)));
+
+            gc.fillRect(0, 0, w, h);
+        } finally {
+            gc.restore();
+        }
+    }
+
+    private void drawArenaHighlights(
+            GraphicsContext gc, double w, double h,
+            double floor, int arena) {
+
+        gc.save();
+        try {
+            double pulse = 0.65 + 0.35 * Math.sin(time * 2.0);
+
+            Color glowColor = switch (arena) {
+                case 0 -> Color.rgb(255, 150, 55, 0.18);
+                case 1 -> Color.rgb(80, 205, 255, 0.16);
+                case 2 -> Color.rgb(55, 160, 255, 0.16);
+                default -> Color.rgb(172, 95, 255, 0.19);
+            };
+
+            // Broad light pool on the floor, behind the fighters.
+            gc.setFill(new RadialGradient(
+                    0, 0, w * 0.5, floor + (h - floor) * 0.18,
+                    w * 0.40,
+                    false, CycleMethod.NO_CYCLE,
+                    new Stop(0, Color.color(
+                            glowColor.getRed(),
+                            glowColor.getGreen(),
+                            glowColor.getBlue(),
+                            glowColor.getOpacity() * pulse)),
+                    new Stop(1, Color.TRANSPARENT)));
+
+            gc.fillOval(
+                    w * 0.12, floor - 15,
+                    w * 0.76, Math.max(1, (h - floor) * 0.85));
+
+            // Fine luminous line above the gameplay floor.
+            gc.setStroke(switch (arena) {
+                case 0 -> Color.rgb(255, 180, 75, 0.35);
+                case 1 -> Color.rgb(100, 220, 255, 0.35);
+                case 2 -> Color.rgb(80, 180, 255, 0.38);
+                default -> Color.rgb(180, 120, 255, 0.38);
+            });
+
+            gc.setLineWidth(1.5 + pulse);
+            gc.strokeLine(0, floor + 1, w, floor + 1);
+
+            if (arena == 2) {
+                // Neon reflections on wet Gotham concrete.
+                gc.setGlobalAlpha(0.12 + pulse * 0.08);
+                gc.setFill(Color.rgb(50, 180, 255, 0.7));
+                gc.fillOval(w * 0.12, floor + 8,
+                        w * 0.25, Math.max(2, (h - floor) * 0.15));
+
+                gc.setFill(Color.rgb(255, 45, 170, 0.6));
+                gc.fillOval(w * 0.63, floor + 12,
+                        w * 0.22, Math.max(2, (h - floor) * 0.12));
+            }
+        } finally {
+            gc.restore();
+        }
+    }
+
+    private void drawCinematicForeground(
+            GraphicsContext gc, double w, double h,
+            double floor, int arena) {
+
+        gc.save();
+        try {
+            // Subtle dark framing helps the fighters stand out.
+            gc.setFill(new LinearGradient(
+                    0, 0, 0, h * 0.20,
+                    false, CycleMethod.NO_CYCLE,
+                    new Stop(0, Color.rgb(0, 0, 0, 0.42)),
+                    new Stop(1, Color.TRANSPARENT)));
+            gc.fillRect(0, 0, w, h * 0.20);
+
+            // Coloured rim light near the arena edges.
+            Color edge = switch (arena) {
+                case 0 -> Color.rgb(255, 125, 45, 0.14);
+                case 1 -> Color.rgb(255, 65, 90, 0.14);
+                case 2 -> Color.rgb(65, 160, 255, 0.15);
+                default -> Color.rgb(160, 90, 255, 0.16);
+            };
+
+            gc.setFill(new LinearGradient(
+                    0, 0, w * 0.16, 0,
+                    false, CycleMethod.NO_CYCLE,
+                    new Stop(0, edge),
+                    new Stop(1, Color.TRANSPARENT)));
+            gc.fillRect(0, 0, w * 0.16, floor);
+
+            gc.setFill(new LinearGradient(
+                    w, 0, w * 0.84, 0,
+                    false, CycleMethod.NO_CYCLE,
+                    new Stop(0, edge),
+                    new Stop(1, Color.TRANSPARENT)));
+            gc.fillRect(w * 0.84, 0, w * 0.16, floor);
+        } finally {
+            gc.restore();
+        }
+    } 
+
+    
     private void drawLightingAndVignette(GraphicsContext gc, double w, double h, int arena) {
         Color tint = switch (arena) {
             case 0 -> Color.rgb(255, 126, 43, 0.035);
